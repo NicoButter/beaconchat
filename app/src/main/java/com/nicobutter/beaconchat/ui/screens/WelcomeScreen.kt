@@ -1,6 +1,9 @@
 package com.nicobutter.beaconchat.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -18,24 +21,50 @@ fun WelcomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
     ) {
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(text = "Welcome to BeaconChat", style = MaterialTheme.typography.headlineLarge)
+        Text(
+                text = "BeaconChat",
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.primary
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Text(text = "Secure Light Communication", style = MaterialTheme.typography.bodyLarge)
+        Text(
+                text = "Comunicación por Luz",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onBackground
+        )
 
         Spacer(modifier = Modifier.height(48.dp))
 
-        Button(onClick = onNavigateToTransmit, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-            Text("Start Transmitter")
+        // Botón Transmitir con icono
+        Button(
+                onClick = onNavigateToTransmit,
+                modifier = Modifier.fillMaxWidth().height(64.dp)
+        ) {
+            Icon(
+                    imageVector = Icons.Default.Send,
+                    contentDescription = "Transmitir",
+                    modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Transmitir Mensaje", style = MaterialTheme.typography.titleMedium)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onNavigateToReceive, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-            Text("Start Receiver")
+        // Botón Recibir con icono
+        OutlinedButton(
+                onClick = onNavigateToReceive,
+                modifier = Modifier.fillMaxWidth().height(64.dp)
+        ) {
+            Icon(
+                    imageVector = Icons.Default.Email,
+                    contentDescription = "Recibir",
+                    modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Recibir Mensaje", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
