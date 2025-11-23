@@ -61,4 +61,10 @@ dependencies {
     implementation("androidx.camera:camera-view:${cameraxVersion}")
     implementation("androidx.camera:camera-extensions:${cameraxVersion}")
     implementation("com.google.guava:guava:31.1-android")
+    // DataStore for user preferences
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    
+    // ZXing for QR code generation and scanning
+    implementation("com.google.zxing:core:3.5.2")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

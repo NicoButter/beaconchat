@@ -7,19 +7,32 @@ class BinaryEncoder {
         private const val WORD_SPACE = 800L // ms - pausa entre palabras
     }
 
+    /** Convierte un texto a su representación binaria ASCII (string legible) */
+    fun encodeToString(text: String): String {
+        return text
+                .map { char ->
+                    if (char == ' ') {
+                        " / " // Separador de palabras
+                    } else {
+                        val asciiValue = char.code
+                        asciiValue.toString(2).padStart(8, '0')
+                    }
+                }
+                .joinToString(" ")
+    }
+
     /**
-     * Codifica un texto en ASCII binario.
-     * Cada carácter se convierte a su valor ASCII de 8 bits.
-     * Un '1' se representa con luz encendida, un '0' con luz apagada.
-     * 
+     * Codifica un texto en ASCII binario. Cada carácter se convierte a su valor ASCII de 8 bits. Un
+     * '1' se representa con luz encendida, un '0' con luz apagada.
+     *
      * Retorna una lista de duraciones alternas (ON, OFF, ON, OFF...)
      */
     fun encode(text: String): List<Long> {
         val timings = mutableListOf<Long>()
-        
+
         for (i in text.indices) {
             val char = text[i]
-            
+
             if (char == ' ') {
                 // Espacio entre palabras - añadir pausa extra
                 if (timings.isNotEmpty() && timings.last() != WORD_SPACE) {
@@ -28,11 +41,11 @@ class BinaryEncoder {
                 }
                 continue
             }
-            
+
             // Convertir carácter a binario de 8 bits
             val asciiValue = char.code // Obtiene el valor ASCII
             val binaryString = asciiValue.toString(2).padStart(8, '0')
-            
+
             // Transmitir cada bit
             for (bit in binaryString) {
                 if (bit == '1') {
@@ -56,7 +69,7 @@ class BinaryEncoder {
                     }
                 }
             }
-            
+
             // Añadir pausa entre bytes (caracteres)
             if (i < text.length - 1) {
                 if (timings.isNotEmpty() && timings.lastIndex % 2 == 0) {
@@ -68,7 +81,7 @@ class BinaryEncoder {
                 }
             }
         }
-        
+
         return timings
     }
 }
