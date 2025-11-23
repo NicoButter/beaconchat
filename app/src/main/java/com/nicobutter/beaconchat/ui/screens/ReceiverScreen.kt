@@ -1,126 +1,154 @@
 package com.nicobutter.beaconchat.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.nicobutter.beaconchat.transceiver.LightDetector
 import com.nicobutter.beaconchat.transceiver.MorseDecoder
+import com.nicobutter.beaconchat.transceiver.QRScanner
+import java.util.concurrent.Executors
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReceiverScreen(modifier: Modifier = Modifier, lifecycleOwner: LifecycleOwner = androidx.compose.ui.platform.LocalContext.current as LifecycleOwner) {
-        val context = androidx.compose.ui.platform.LocalContext.current
+fun ReceiverScreen(
+        modifier: Modifier = Modifier,
+        lifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current
+) {
+        val context = LocalContext.current
         var isLightOn by remember { mutableStateOf(false) }
+        var isQrMode by remember { mutableStateOf(false) }
+        var qrMessage by remember { mutableStateOf("") }
+        var lastQrDetectionTime by remember { mutableStateOf(0L) }
 
         val morseDecoder = remember { MorseDecoder() }
-
-        val cameraProviderFuture = remember {
-                androidx.camera.lifecycle.ProcessCameraProvider.getInstance(context)
-        }
+        val previewView = remember { PreviewView(context) }
+        val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
 
         var hasCameraPermission by remember {
                 mutableStateOf(
-                        androidx.core.content.ContextCompat.checkSelfPermission(
-                                context,
-                                android.Manifest.permission.CAMERA
-                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                                PackageManager.PERMISSION_GRANTED
                 )
         }
 
         val launcher =
-                androidx.activity.compose.rememberLauncherForActivityResult(
-                        contract =
-                                androidx.activity.result.contract.ActivityResultContracts
-                                        .RequestPermission(),
+                rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.RequestPermission(),
                         onResult = { granted -> hasCameraPermission = granted }
                 )
 
         LaunchedEffect(Unit) {
                 if (!hasCameraPermission) {
-                        launcher.launch(android.Manifest.permission.CAMERA)
+                        launcher.launch(Manifest.permission.CAMERA)
+                }
+        }
+
+        // Camera setup
+        LaunchedEffect(hasCameraPermission, isQrMode) {
+                if (hasCameraPermission) {
+                        val cameraProvider = ProcessCameraProvider.getInstance(context).await()
+
+                        val preview =
+                                Preview.Builder().build().also {
+                                        it.setSurfaceProvider(previewView.surfaceProvider)
+                                }
+
+                        val imageAnalysis =
+                                ImageAnalysis.Builder()
+                                        .setBackpressureStrategy(
+                                                ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
+                                        )
+                                        .build()
+
+                        if (isQrMode) {
+                                imageAnalysis.setAnalyzer(
+                                        analysisExecutor,
+                                        QRScanner { content ->
+                                                qrMessage = content
+                                                lastQrDetectionTime = System.currentTimeMillis()
+                                        }
+                                )
+                        } else {
+                                imageAnalysis.setAnalyzer(
+                                        analysisExecutor,
+                                        LightDetector { lightDetected ->
+                                                isLightOn = lightDetected
+                                                morseDecoder.onLightStateChanged(lightDetected)
+                                        }
+                                )
+                        }
+
+                        try {
+                                cameraProvider.unbindAll()
+                                cameraProvider.bindToLifecycle(
+                                        lifecycleOwner,
+                                        CameraSelector.DEFAULT_BACK_CAMERA,
+                                        preview,
+                                        imageAnalysis
+                                )
+                        } catch (exc: Exception) {
+                                exc.printStackTrace()
+                        }
                 }
         }
 
         if (hasCameraPermission) {
                 Box(modifier = modifier.fillMaxSize()) {
-                        androidx.compose.ui.viewinterop.AndroidView(
-                                factory = { ctx ->
-                                        val previewView = androidx.camera.view.PreviewView(ctx)
-                                        // Use a background executor for image analysis to avoid
-                                        // blocking the main
-                                        // thread
-                                        val analysisExecutor =
-                                                java.util.concurrent.Executors
-                                                        .newSingleThreadExecutor()
+                        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 
-                                        cameraProviderFuture.addListener(
-                                                {
-                                                        val cameraProvider =
-                                                                cameraProviderFuture.get()
-                                                        val preview =
-                                                                androidx.camera.core.Preview
-                                                                        .Builder()
-                                                                        .build()
-                                                                        .also {
-                                                                                it.setSurfaceProvider(
-                                                                                        previewView
-                                                                                                .surfaceProvider
-                                                                                )
-                                                                        }
-
-                                                        val imageAnalysis =
-                                                                androidx.camera.core.ImageAnalysis
-                                                                        .Builder()
-                                                                        .setBackpressureStrategy(
-                                                                                androidx.camera.core
-                                                                                        .ImageAnalysis
-                                                                                        .STRATEGY_KEEP_ONLY_LATEST
-                                                                        )
-                                                                        .build()
-                                                                        .also {
-                                                                                it.setAnalyzer(
-                                                                                        analysisExecutor,
-                                                                                        LightDetector {
-                                                                                                lightDetected
-                                                                                                ->
-                                                                                                isLightOn =
-                                                                                                        lightDetected
-                                                                                                morseDecoder
-                                                                                                        .onLightStateChanged(
-                                                                                                                lightDetected
-                                                                                                        )
-                                                                                        }
-                                                                                )
-                                                                        }
-
-                                                        try {
-                                                                cameraProvider.unbindAll()
-                                                                cameraProvider.bindToLifecycle(
-                                                                        lifecycleOwner,
-                                                                        androidx.camera.core
-                                                                                .CameraSelector
-                                                                                .DEFAULT_BACK_CAMERA,
-                                                                        preview,
-                                                                        imageAnalysis
-                                                                )
-                                                        } catch (exc: Exception) {
-                                                                exc.printStackTrace()
-                                                        }
-                                                },
-                                                androidx.core.content.ContextCompat.getMainExecutor(
-                                                        ctx
+                        // Mode Toggle
+                        Row(
+                                modifier =
+                                        Modifier.align(Alignment.TopCenter)
+                                                .padding(top = 16.dp)
+                                                .background(
+                                                        MaterialTheme.colorScheme.surface.copy(
+                                                                alpha = 0.8f
+                                                        ),
+                                                        MaterialTheme.shapes.extraLarge
                                                 )
-                                        )
+                                                .padding(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                                FilterChip(
+                                        selected = !isQrMode,
+                                        onClick = { isQrMode = false },
+                                        label = { Text("Luz (Morse)") },
+                                        leadingIcon = { Icon(Icons.Default.Info, null) }
+                                )
+                                FilterChip(
+                                        selected = isQrMode,
+                                        onClick = { isQrMode = true },
+                                        label = { Text("QR Code") },
+                                        leadingIcon = { Icon(Icons.Default.Search, null) }
+                                )
+                        }
 
-                                        previewView
-                                },
-                                modifier = Modifier.fillMaxSize()
-                        )
-
+                        // Info Panel
                         Column(
                                 modifier =
                                         Modifier.align(Alignment.BottomCenter)
@@ -128,35 +156,92 @@ fun ReceiverScreen(modifier: Modifier = Modifier, lifecycleOwner: LifecycleOwner
                                                 .fillMaxWidth()
                                                 .background(
                                                         MaterialTheme.colorScheme.surface.copy(
-                                                                alpha = 0.7f
+                                                                alpha = 0.9f
                                                         ),
                                                         MaterialTheme.shapes.medium
                                                 )
                                                 .padding(16.dp)
                         ) {
-                                Text(
-                                        text =
-                                                "Status: ${if (isLightOn) "LIGHT ON" else "LIGHT OFF"}",
-                                        color =
-                                                if (isLightOn)
-                                                        androidx.compose.ui.graphics.Color.Green
-                                                else androidx.compose.ui.graphics.Color.Red,
-                                        style = MaterialTheme.typography.labelLarge
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                        text =
-                                                if (morseDecoder.decodedMessage.isEmpty())
-                                                        "Waiting for signal..."
-                                                else morseDecoder.decodedMessage,
-                                        style = MaterialTheme.typography.bodyLarge
-                                )
-                                Button(onClick = { morseDecoder.reset() }) { Text("Clear") }
+                                if (isQrMode) {
+                                        Text(
+                                                text = "Escáner QR Activo",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        if (qrMessage.isNotEmpty()) {
+                                                Text(
+                                                        text = "Último mensaje recibido:",
+                                                        style =
+                                                                MaterialTheme.typography
+                                                                        .labelMedium,
+                                                        color =
+                                                                MaterialTheme.colorScheme
+                                                                        .onSurfaceVariant
+                                                )
+                                                Text(
+                                                        text = qrMessage,
+                                                        style =
+                                                                MaterialTheme.typography
+                                                                        .headlineSmall,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Button(
+                                                        onClick = { qrMessage = "" },
+                                                        modifier = Modifier.align(Alignment.End)
+                                                ) { Text("Limpiar") }
+                                        } else {
+                                                Text(
+                                                        text =
+                                                                "Apunta a un código QR para escanear...",
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        color =
+                                                                MaterialTheme.colorScheme
+                                                                        .onSurfaceVariant
+                                                )
+                                        }
+                                } else {
+                                        Text(
+                                                text =
+                                                        "Status: ${if (isLightOn) "LIGHT ON" else "LIGHT OFF"}",
+                                                color = if (isLightOn) Color.Green else Color.Red,
+                                                style = MaterialTheme.typography.labelLarge
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                                text =
+                                                        if (morseDecoder.decodedMessage.isEmpty())
+                                                                "Esperando señal..."
+                                                        else morseDecoder.decodedMessage,
+                                                style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        Button(onClick = { morseDecoder.reset() }) {
+                                                Text("Limpiar")
+                                        }
+                                }
                         }
                 }
         } else {
                 Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Camera permission required to receive messages.")
+                        Text("Se requiere permiso de cámara para recibir mensajes.")
                 }
+        }
+}
+
+// Extension to await ProcessCameraProvider
+private suspend fun com.google.common.util.concurrent.ListenableFuture<
+        ProcessCameraProvider>.await(): ProcessCameraProvider {
+        return suspendCoroutine { cont ->
+                addListener(
+                        {
+                                try {
+                                        cont.resume(get())
+                                } catch (e: Exception) {
+                                        cont.resumeWith(Result.failure(e))
+                                }
+                        },
+                        { command -> command.run() }
+                ) // Run directly or use main executor
         }
 }
