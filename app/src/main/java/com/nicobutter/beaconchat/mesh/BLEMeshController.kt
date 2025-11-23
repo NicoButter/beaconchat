@@ -1,8 +1,7 @@
 package com.nicobutter.beaconchat.mesh
 
 import android.Manifest
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothManager
+import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
 import android.content.pm.PackageManager
@@ -22,13 +21,22 @@ class BLEMeshController(private val context: Context) {
 
     private var bluetoothLeAdvertiser: BluetoothLeAdvertiser? = null
     private var bluetoothLeScanner: BluetoothLeScanner? = null
+    private var bluetoothGattServer: BluetoothGattServer? = null
 
     // Service UUID for BeaconChat (BEEF = BeaconChat)
     private val SERVICE_UUID = UUID.fromString("0000BEEF-0000-1000-8000-00805f9b34fb")
 
+    // Chat Service & Characteristic UUIDs
+    private val CHAT_SERVICE_UUID = UUID.fromString("0000CHAT-0000-1000-8000-00805f9b34fb")
+    private val MESSAGE_CHARACTERISTIC_UUID =
+            UUID.fromString("0000MSG1-0000-1000-8000-00805f9b34fb")
+
     // State flows
     private val _peers = MutableStateFlow<List<MeshPeer>>(emptyList())
     val peers: StateFlow<List<MeshPeer>> = _peers.asStateFlow()
+
+    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
     private val _isAdvertising = MutableStateFlow(false)
     val isAdvertising: StateFlow<Boolean> = _isAdvertising.asStateFlow()
@@ -49,7 +57,7 @@ class BLEMeshController(private val context: Context) {
         bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
     }
 
-    /** Start advertising this device's presence */
+    /** Start advertising this device's presence and GATT Server */
     fun startAdvertising(callsign: String) {
         if (!checkBluetoothPermissions()) {
             Log.e(TAG, "Missing Bluetooth permissions")
@@ -62,6 +70,9 @@ class BLEMeshController(private val context: Context) {
         }
 
         try {
+            // Start GATT Server
+            startGattServer()
+
             val settings =
                     AdvertiseSettings.Builder()
                             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
@@ -93,6 +104,7 @@ class BLEMeshController(private val context: Context) {
 
         try {
             bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
+            stopGattServer()
             _isAdvertising.value = false
             Log.d(TAG, "Stopped advertising")
         } catch (e: SecurityException) {
@@ -145,11 +157,207 @@ class BLEMeshController(private val context: Context) {
         }
     }
 
+    /** Send a message to a peer */
+    fun sendMessage(peerAddress: String, message: String, myCallsign: String) {
+        if (!checkBluetoothPermissions()) return
+
+        try {
+            val device = bluetoothAdapter?.getRemoteDevice(peerAddress) ?: return
+            Log.d(TAG, "Connecting to $peerAddress to send message")
+
+            // Connect to GATT Server on peer
+            device.connectGatt(
+                    context,
+                    false,
+                    object : BluetoothGattCallback() {
+                        override fun onConnectionStateChange(
+                                gatt: BluetoothGatt?,
+                                status: Int,
+                                newState: Int
+                        ) {
+                            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                                Log.d(TAG, "Connected to GATT server. Discovering services...")
+                                gatt?.discoverServices()
+                            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                                Log.d(TAG, "Disconnected from GATT server")
+                                gatt?.close()
+                            }
+                        }
+
+                        override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
+                            if (status == BluetoothGatt.GATT_SUCCESS) {
+                                val service = gatt?.getService(CHAT_SERVICE_UUID)
+                                val characteristic =
+                                        service?.getCharacteristic(MESSAGE_CHARACTERISTIC_UUID)
+
+                                if (characteristic != null) {
+                                    // Format: "CALLSIGN:MESSAGE"
+                                    val payload = "$myCallsign:$message"
+                                    characteristic.value = payload.toByteArray(Charsets.UTF_8)
+                                    characteristic.writeType =
+                                            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+
+                                    val success = gatt.writeCharacteristic(characteristic)
+                                    Log.d(TAG, "Write characteristic status: $success")
+
+                                    if (success) {
+                                        // Add to local messages
+                                        val chatMessage =
+                                                ChatMessage(
+                                                        senderId = "ME",
+                                                        senderName = myCallsign,
+                                                        content = message,
+                                                        timestamp = System.currentTimeMillis(),
+                                                        isFromMe = true
+                                                )
+                                        val currentMessages = _messages.value.toMutableList()
+                                        currentMessages.add(chatMessage)
+                                        _messages.value = currentMessages
+                                    }
+                                } else {
+                                    Log.e(TAG, "Message characteristic not found")
+                                }
+                            } else {
+                                Log.w(TAG, "onServicesDiscovered received: $status")
+                            }
+                        }
+
+                        override fun onCharacteristicWrite(
+                                gatt: BluetoothGatt?,
+                                characteristic: BluetoothGattCharacteristic?,
+                                status: Int
+                        ) {
+                            if (status == BluetoothGatt.GATT_SUCCESS) {
+                                Log.d(TAG, "Message sent successfully")
+                            } else {
+                                Log.e(TAG, "Failed to send message. Status: $status")
+                            }
+                            gatt?.disconnect() // Disconnect after sending
+                        }
+                    }
+            )
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Security exception sending message", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending message", e)
+        }
+    }
+
+    private fun startGattServer() {
+        if (!checkBluetoothPermissions()) return
+
+        try {
+            val bluetoothManager =
+                    context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+            bluetoothGattServer = bluetoothManager.openGattServer(context, gattServerCallback)
+
+            val service =
+                    BluetoothGattService(
+                            CHAT_SERVICE_UUID,
+                            BluetoothGattService.SERVICE_TYPE_PRIMARY
+                    )
+
+            val characteristic =
+                    BluetoothGattCharacteristic(
+                            MESSAGE_CHARACTERISTIC_UUID,
+                            BluetoothGattCharacteristic.PROPERTY_WRITE,
+                            BluetoothGattCharacteristic.PERMISSION_WRITE
+                    )
+
+            service.addCharacteristic(characteristic)
+            bluetoothGattServer?.addService(service)
+            Log.d(TAG, "GATT Server started")
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Security exception starting GATT server", e)
+        }
+    }
+
+    private fun stopGattServer() {
+        if (!checkBluetoothPermissions()) return
+        try {
+            bluetoothGattServer?.close()
+            bluetoothGattServer = null
+            Log.d(TAG, "GATT Server stopped")
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Security exception stopping GATT server", e)
+        }
+    }
+
+    private val gattServerCallback =
+            object : BluetoothGattServerCallback() {
+                override fun onConnectionStateChange(
+                        device: BluetoothDevice?,
+                        status: Int,
+                        newState: Int
+                ) {
+                    super.onConnectionStateChange(device, status, newState)
+                    Log.d(TAG, "GATT Server connection state change: $newState")
+                }
+
+                override fun onCharacteristicWriteRequest(
+                        device: BluetoothDevice?,
+                        requestId: Int,
+                        characteristic: BluetoothGattCharacteristic?,
+                        preparedWrite: Boolean,
+                        responseNeeded: Boolean,
+                        offset: Int,
+                        value: ByteArray?
+                ) {
+                    super.onCharacteristicWriteRequest(
+                            device,
+                            requestId,
+                            characteristic,
+                            preparedWrite,
+                            responseNeeded,
+                            offset,
+                            value
+                    )
+
+                    if (MESSAGE_CHARACTERISTIC_UUID == characteristic?.uuid) {
+                        value?.let {
+                            val messageString = String(it, Charsets.UTF_8)
+                            Log.d(TAG, "Received message: $messageString")
+
+                            // Parse "CALLSIGN:MESSAGE"
+                            val parts = messageString.split(":", limit = 2)
+                            if (parts.size == 2) {
+                                val senderCallsign = parts[0]
+                                val content = parts[1]
+
+                                val chatMessage =
+                                        ChatMessage(
+                                                senderId = device?.address ?: "UNKNOWN",
+                                                senderName = senderCallsign,
+                                                content = content,
+                                                timestamp = System.currentTimeMillis(),
+                                                isFromMe = false
+                                        )
+
+                                val currentMessages = _messages.value.toMutableList()
+                                currentMessages.add(chatMessage)
+                                _messages.value = currentMessages
+                            }
+                        }
+
+                        if (responseNeeded) {
+                            bluetoothGattServer?.sendResponse(
+                                    device,
+                                    requestId,
+                                    BluetoothGatt.GATT_SUCCESS,
+                                    0,
+                                    null
+                            )
+                        }
+                    }
+                }
+            }
+
     /** Cleanup resources */
     fun cleanup() {
         stopAdvertising()
         stopScanning()
         _peers.value = emptyList()
+        _messages.value = emptyList()
         Log.d(TAG, "Cleaned up")
     }
 
