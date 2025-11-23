@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.nicobutter.beaconchat.transceiver.FlashlightController
 import com.nicobutter.beaconchat.transceiver.MorseEncoder
+import com.nicobutter.beaconchat.transceiver.BinaryEncoder
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -22,6 +23,11 @@ enum class TransmissionMethod {
     FLASHLIGHT,
     VIBRATION,
     SOUND
+}
+
+enum class EncodingType {
+    MORSE,
+    ASCII_BINARY
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -34,15 +40,20 @@ fun TransmitterScreen(
     var text by remember { mutableStateOf("") }
     var isTransmitting by remember { mutableStateOf(false) }
     var selectedMethod by remember { mutableStateOf(TransmissionMethod.FLASHLIGHT) }
+    var selectedEncoding by remember { mutableStateOf(EncodingType.MORSE) }
     var transmissionJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
+    val binaryEncoder = remember { BinaryEncoder() }
 
     // Función para transmitir continuamente
     fun startContinuousTransmission(message: String) {
         if (message.isNotBlank()) {
             isTransmitting = true
             transmissionJob = scope.launch {
-                val timings = morseEncoder.encode(message)
+                val timings = when (selectedEncoding) {
+                    EncodingType.MORSE -> morseEncoder.encode(message)
+                    EncodingType.ASCII_BINARY -> binaryEncoder.encode(message)
+                }
                 while (isActive && isTransmitting) {
                     when (selectedMethod) {
                         TransmissionMethod.FLASHLIGHT -> flashlightController.transmit(timings)
@@ -68,7 +79,10 @@ fun TransmitterScreen(
         if (message.isNotBlank()) {
             isTransmitting = true
             scope.launch {
-                val timings = morseEncoder.encode(message)
+                val timings = when (selectedEncoding) {
+                    EncodingType.MORSE -> morseEncoder.encode(message)
+                    EncodingType.ASCII_BINARY -> binaryEncoder.encode(message)
+                }
                 when (selectedMethod) {
                     TransmissionMethod.FLASHLIGHT -> flashlightController.transmit(timings)
                     TransmissionMethod.VIBRATION -> { /* TODO: Implementar vibración */ }
@@ -203,6 +217,38 @@ fun TransmitterScreen(
                 enabled = !isTransmitting,
                 maxLines = 3
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Tipo de codificación
+        Text(
+                text = "Tipo de Codificación",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                    selected = selectedEncoding == EncodingType.MORSE,
+                    onClick = { selectedEncoding = EncodingType.MORSE },
+                    label = { Text("📻 Código Morse") },
+                    enabled = !isTransmitting,
+                    modifier = Modifier.weight(1f)
+            )
+
+            FilterChip(
+                    selected = selectedEncoding == EncodingType.ASCII_BINARY,
+                    onClick = { selectedEncoding = EncodingType.ASCII_BINARY },
+                    label = { Text("💻 ASCII Binario") },
+                    enabled = !isTransmitting,
+                    modifier = Modifier.weight(1f)
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
