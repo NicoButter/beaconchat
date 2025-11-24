@@ -2,7 +2,9 @@ package com.nicobutter.beaconchat.transceiver
 
 class MorseEncoder {
     companion object {
-        private const val DOT_DURATION = 200L // ms
+    // Base time unit (DOT). Reduced from 200ms to 120ms to improve transmission speed
+    // while keeping reliability with typical phone cameras (30 fps => ~33ms/frame).
+    private const val DOT_DURATION = 120L // ms
         private const val DASH_DURATION = DOT_DURATION * 3
         private const val SYMBOL_SPACE = DOT_DURATION // Space between dots/dashes
         private const val LETTER_SPACE = DOT_DURATION * 3 // Space between letters

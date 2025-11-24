@@ -9,15 +9,16 @@ class LightDetector(private val onLightStateChanged: (Boolean) -> Unit) : ImageA
     private var lastState = false
     private var threshold = 150 // Initial threshold, can be dynamic
     private val history = ArrayDeque<Int>()
-    private val historySize = 30
+    // Reduce history size so threshold adapts faster to changing light conditions
+    private val historySize = 8
 
     override fun analyze(image: ImageProxy) {
         val buffer = image.planes[0].buffer
-        val data = toByteArray(buffer)
-        val pixels = data.map { it.toInt() and 0xFF }
+    val data = toByteArray(buffer)
 
-        // Calculate average brightness of the center 10% of the image
-        // This is a simplification. Ideally we crop the center.
+    // Calculate average brightness of the center region of the image.
+    // Widen the sampled ROI from 10% to ~16% to increase chance of including the flashlight
+    // even if the user isn't perfectly centered.
         // Since we have the raw Y plane (luminance), we can just average the bytes.
         // To be efficient, let's just sample the center.
 
@@ -25,7 +26,7 @@ class LightDetector(private val onLightStateChanged: (Boolean) -> Unit) : ImageA
         val height = image.height
         val centerX = width / 2
         val centerY = height / 2
-        val cropSize = minOf(width, height) / 10
+    val cropSize = minOf(width, height) / 6
 
         var sum = 0L
         var count = 0
@@ -59,9 +60,9 @@ class LightDetector(private val onLightStateChanged: (Boolean) -> Unit) : ImageA
         val min = history.minOrNull() ?: 0
         val max = history.maxOrNull() ?: 255
 
-        // If dynamic range is small, assume noise and keep previous state or default to OFF
-        // If dynamic range is significant, set threshold in the middle
-        if (max - min > 20) {
+        // If dynamic range is small, assume noise. If significant, set threshold in the middle.
+        // With smaller history, accept a slightly smaller required range.
+        if (max - min > 15) {
             threshold = (max + min) / 2
         }
 

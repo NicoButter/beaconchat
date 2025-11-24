@@ -14,13 +14,15 @@ class MorseDecoder {
     private var currentSymbol = StringBuilder() // . or -
 
     // Standard timings (approximate, will need tolerance)
-    private val DOT_DURATION = 200L
+    // Reduced DOT_DURATION to match encoder change (120ms) for faster, reliable transmission
+    private val DOT_DURATION = 120L
     private val DASH_DURATION = DOT_DURATION * 3
     private val SYMBOL_SPACE = DOT_DURATION
     private val LETTER_SPACE = DOT_DURATION * 3
     private val WORD_SPACE = DOT_DURATION * 7
 
-    private val tolerance = 100L // +/- 100ms
+    // Tolerance around measured durations. Reduced to accommodate the shorter DOT.
+    private val tolerance = 60L // +/- 60ms
 
     private val morseCodeMapReverse =
             mapOf(
