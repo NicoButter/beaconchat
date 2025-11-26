@@ -23,6 +23,7 @@ import com.nicobutter.beaconchat.transceiver.FlashlightController
 import com.nicobutter.beaconchat.transceiver.MorseEncoder
 import com.nicobutter.beaconchat.transceiver.SoundController
 import com.nicobutter.beaconchat.transceiver.VibrationController
+import com.nicobutter.beaconchat.ui.screens.LightMapScreen
 import com.nicobutter.beaconchat.ui.screens.MeshScreen
 import com.nicobutter.beaconchat.ui.screens.ReceiverScreen
 import com.nicobutter.beaconchat.ui.screens.SettingsScreen
@@ -99,6 +100,17 @@ class MainActivity : ComponentActivity() {
                                                                 NavigationBarItem(
                                                                         selected =
                                                                                 currentScreen ==
+                                                                                        "lightmap",
+                                                                        onClick = {
+                                                                                currentScreen =
+                                                                                        "lightmap"
+                                                                        },
+                                                                        icon = { Text("🎯") },
+                                                                        label = { Text("Radar") }
+                                                                )
+                                                                NavigationBarItem(
+                                                                        selected =
+                                                                                currentScreen ==
                                                                                         "settings",
                                                                         onClick = {
                                                                                 currentScreen =
@@ -151,6 +163,14 @@ class MainActivity : ComponentActivity() {
                                                         MeshScreen(
                                                                 meshController = meshController,
                                                                 userPreferences = userPreferences,
+                                                                modifier =
+                                                                        Modifier.padding(
+                                                                                innerPadding
+                                                                        )
+                                                        )
+                                                "lightmap" ->
+                                                        LightMapScreen(
+                                                                flashlightController = flashlightController,
                                                                 modifier =
                                                                         Modifier.padding(
                                                                                 innerPadding

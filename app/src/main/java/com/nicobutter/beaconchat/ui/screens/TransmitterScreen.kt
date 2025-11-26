@@ -76,8 +76,8 @@ fun TransmitterScreen(
                 while (isActive && isTransmitting) {
                     when (selectedMethod) {
                         TransmissionMethod.FLASHLIGHT -> flashlightController.transmit(timings)
-                        TransmissionMethod.VIBRATION -> { /* TODO */ }
-                        TransmissionMethod.SOUND -> { /* TODO */ }
+                        TransmissionMethod.VIBRATION -> vibrationController.transmit(timings)
+                        TransmissionMethod.SOUND -> soundController.transmit(timings)
                     }
                     kotlinx.coroutines.delay(500)
                 }
@@ -101,8 +101,8 @@ fun TransmitterScreen(
                 }
                 when (selectedMethod) {
                     TransmissionMethod.FLASHLIGHT -> flashlightController.transmit(timings)
-                    TransmissionMethod.VIBRATION -> { /* TODO */ }
-                    TransmissionMethod.SOUND -> { /* TODO */ }
+                    TransmissionMethod.VIBRATION -> vibrationController.transmit(timings)
+                    TransmissionMethod.SOUND -> soundController.transmit(timings)
                 }
                 isTransmitting = false
             }
@@ -141,16 +141,47 @@ fun TransmitterScreen(
 
         // Quick messages
         Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(6.dp)) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text("Mensajes rápidos", style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    QuickActionButton(label = "SOS", icon = Icons.Default.Warning, onClick = { startContinuousTransmission("SOS") }, enabled = !isTransmitting, modifier = Modifier.weight(1f).height(48.dp))
-                    QuickActionButton(label = "AUXILIO", icon = Icons.Default.Info, onClick = { startContinuousTransmission("AUXILIO") }, enabled = !isTransmitting, modifier = Modifier.weight(1f).height(48.dp))
-                    QuickActionButton(label = "AYUDA", icon = Icons.Default.Info, onClick = { startContinuousTransmission("AYUDA") }, enabled = !isTransmitting, modifier = Modifier.weight(1f).height(48.dp))
-                    QuickActionButton(label = "OK", icon = Icons.Default.Info, onClick = { startContinuousTransmission("OK") }, enabled = !isTransmitting, modifier = Modifier.weight(1f).height(48.dp))
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Mensajes rápidos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Primera fila: SOS y AUXILIO
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    QuickActionButton(
+                        label = "SOS", 
+                        icon = Icons.Default.Warning, 
+                        onClick = { startContinuousTransmission("SOS") }, 
+                        enabled = !isTransmitting, 
+                        modifier = Modifier.weight(1f).height(64.dp)
+                    )
+                    QuickActionButton(
+                        label = "AUXILIO", 
+                        icon = Icons.Default.Info, 
+                        onClick = { startContinuousTransmission("AUXILIO") }, 
+                        enabled = !isTransmitting, 
+                        modifier = Modifier.weight(1f).height(64.dp)
+                    )
                 }
-
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Segunda fila: AYUDA y OK
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    QuickActionButton(
+                        label = "AYUDA", 
+                        icon = Icons.Default.Info, 
+                        onClick = { startContinuousTransmission("AYUDA") }, 
+                        enabled = !isTransmitting, 
+                        modifier = Modifier.weight(1f).height(64.dp)
+                    )
+                    QuickActionButton(
+                        label = "OK", 
+                        icon = Icons.Default.Info, 
+                        onClick = { startContinuousTransmission("OK") }, 
+                        enabled = !isTransmitting, 
+                        modifier = Modifier.weight(1f).height(64.dp)
+                    )
+                }
             }
         }
 
@@ -209,10 +240,18 @@ fun TransmitterScreen(
 
 @Composable
 private fun QuickActionButton(label: String, icon: ImageVector, onClick: () -> Unit, enabled: Boolean, modifier: Modifier = Modifier) {
-    Button(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(12.dp), modifier = modifier) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(label)
+    Button(
+        onClick = onClick, 
+        enabled = enabled, 
+        shape = RoundedCornerShape(12.dp), 
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Text(
+            label, 
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
