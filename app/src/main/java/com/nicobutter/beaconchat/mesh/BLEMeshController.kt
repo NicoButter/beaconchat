@@ -26,10 +26,10 @@ class BLEMeshController(private val context: Context) {
     // Service UUID for BeaconChat (BEEF = BeaconChat)
     private val SERVICE_UUID = UUID.fromString("0000BEEF-0000-1000-8000-00805f9b34fb")
 
-    // Chat Service & Characteristic UUIDs
-    private val CHAT_SERVICE_UUID = UUID.fromString("0000CHAT-0000-1000-8000-00805f9b34fb")
+    // Chat Service & Characteristic UUIDs (using valid hex values)
+    private val CHAT_SERVICE_UUID = UUID.fromString("0000C4A7-0000-1000-8000-00805f9b34fb")
     private val MESSAGE_CHARACTERISTIC_UUID =
-            UUID.fromString("0000MSG1-0000-1000-8000-00805f9b34fb")
+            UUID.fromString("00004D51-0000-1000-8000-00805f9b34fb")
 
     // State flows
     private val _peers = MutableStateFlow<List<MeshPeer>>(emptyList())

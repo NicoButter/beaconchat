@@ -5,9 +5,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +52,11 @@ class MainActivity : ComponentActivity() {
 
                 setContent {
                         BeaconChatTheme {
-                                var currentScreen by remember { mutableStateOf("welcome") }
+                                Surface(
+                                        modifier = Modifier.fillMaxSize(),
+                                        color = MaterialTheme.colorScheme.background
+                                ) {
+                                        var currentScreen by remember { mutableStateOf("welcome") }
 
                                 Scaffold(
                                         modifier = Modifier.fillMaxSize(),
@@ -159,6 +165,7 @@ class MainActivity : ComponentActivity() {
                                                                         )
                                                         )
                                         }
+                                }
                                 }
                         }
                 }
