@@ -77,6 +77,8 @@ fun LightMapScreen(
     
     val lightScanner = remember { LightScanner() }
     val detectedDevices by lightScanner.detectedDevices.collectAsState()
+    val signalData by lightScanner.signalData.collectAsState()
+    val signalStats by lightScanner.signalStats.collectAsState()
     
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) {
@@ -218,6 +220,24 @@ fun LightMapScreen(
             }
         }
         
+        // Mini-osciloscopio de señal (debajo del radar)
+        if (isScanningActive && hasCameraPermission) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF001100)
+                )
+            ) {
+                MiniOscilloscope(
+                    signalData = signalData,
+                    stats = signalStats,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+        
         // Lista de dispositivos detectados
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -275,7 +295,7 @@ private fun CameraPreview(
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
                 
-                // Configuración optimizada para performance
+                // Configuración optimizada para máxima sensibilidad a flashes
                 val imageAnalysis = ImageAnalysis.Builder()
                     .setTargetResolution(android.util.Size(640, 480)) // Resolución baja para mejor performance
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -289,12 +309,21 @@ private fun CameraPreview(
                 
                 try {
                     cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
+                    val camera = cameraProvider.bindToLifecycle(
                         lifecycleOwner,
                         cameraSelector,
                         preview,
                         imageAnalysis
                     )
+                    
+                    // Configurar cámara para máxima sensibilidad a flashes
+                    camera.cameraControl.setExposureCompensationIndex(
+                        camera.cameraInfo.exposureState.exposureCompensationRange.upper
+                    )
+                    
+                    // Configurar foco infinito para mejor detección de flashes distantes
+                    camera.cameraControl.setLinearZoom(0f)
+                    
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -379,6 +408,79 @@ private fun RadarOverlay(
             radius = 8f,
             center = center
         )
+    }
+}
+
+@Composable
+private fun MiniOscilloscope(
+    signalData: List<LightScanner.IntensityPoint>,
+    stats: LightScanner.SignalStats,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+            val width = size.width
+            val height = size.height
+            
+            // Línea central (referencia)
+            drawLine(
+                color = Color.Green.copy(alpha = 0.2f),
+                start = Offset(0f, height / 2),
+                end = Offset(width, height / 2),
+                strokeWidth = 1f
+            )
+            
+            if (signalData.isEmpty()) return@Canvas
+            
+            // Graficar señal
+            val pointSpacing = width / signalData.size.coerceAtLeast(1)
+            
+            signalData.forEachIndexed { index, point ->
+                val x = index * pointSpacing
+                val y = height - (point.intensity.toFloat() / 255f * height)
+                
+                // Línea vertical para cada punto
+                if (index > 0) {
+                    val prevPoint = signalData[index - 1]
+                    val prevX = (index - 1) * pointSpacing
+                    val prevY = height - (prevPoint.intensity.toFloat() / 255f * height)
+                    
+                    drawLine(
+                        color = Color.Green,
+                        start = Offset(prevX, prevY),
+                        end = Offset(x, y),
+                        strokeWidth = 1.5f
+                    )
+                }
+                
+                // Marcar picos en rojo
+                if (point.isPeak) {
+                    drawCircle(
+                        color = Color.Red,
+                        radius = 3f,
+                        center = Offset(x, y)
+                    )
+                }
+            }
+        }
+        
+        // Stats overlay
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(4.dp)
+        ) {
+            Text(
+                "${stats.fps} FPS",
+                color = Color.Green,
+                style = MaterialTheme.typography.labelSmall
+            )
+            Text(
+                "Noise: ${stats.noiseLevel}",
+                color = Color.Yellow,
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
     }
 }
 

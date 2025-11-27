@@ -206,6 +206,7 @@ class BLEMeshController(private val context: Context) {
                                                 ChatMessage(
                                                         senderId = "ME",
                                                         senderName = myCallsign,
+                                                        recipientId = peerAddress,
                                                         content = message,
                                                         timestamp = System.currentTimeMillis(),
                                                         isFromMe = true
@@ -316,7 +317,7 @@ class BLEMeshController(private val context: Context) {
                     if (MESSAGE_CHARACTERISTIC_UUID == characteristic?.uuid) {
                         value?.let {
                             val messageString = String(it, Charsets.UTF_8)
-                            Log.d(TAG, "Received message: $messageString")
+                            Log.d(TAG, "Received message: $messageString from ${device?.address}")
 
                             // Parse "CALLSIGN:MESSAGE"
                             val parts = messageString.split(":", limit = 2)
@@ -328,6 +329,7 @@ class BLEMeshController(private val context: Context) {
                                         ChatMessage(
                                                 senderId = device?.address ?: "UNKNOWN",
                                                 senderName = senderCallsign,
+                                                recipientId = "ME", // Este dispositivo es el receptor
                                                 content = content,
                                                 timestamp = System.currentTimeMillis(),
                                                 isFromMe = false
@@ -336,6 +338,8 @@ class BLEMeshController(private val context: Context) {
                                 val currentMessages = _messages.value.toMutableList()
                                 currentMessages.add(chatMessage)
                                 _messages.value = currentMessages
+                                
+                                Log.d(TAG, "Message added to list. Total messages: ${currentMessages.size}")
                             }
                         }
 

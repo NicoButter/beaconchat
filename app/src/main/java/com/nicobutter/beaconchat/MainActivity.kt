@@ -25,6 +25,7 @@ import com.nicobutter.beaconchat.transceiver.SoundController
 import com.nicobutter.beaconchat.transceiver.VibrationController
 import com.nicobutter.beaconchat.ui.screens.LightMapScreen
 import com.nicobutter.beaconchat.ui.screens.MeshScreen
+import com.nicobutter.beaconchat.ui.screens.OscilloscopeScreen
 import com.nicobutter.beaconchat.ui.screens.ReceiverScreen
 import com.nicobutter.beaconchat.ui.screens.SettingsScreen
 import com.nicobutter.beaconchat.ui.screens.TransmitterScreen
@@ -120,6 +121,20 @@ class MainActivity : ComponentActivity() {
                                                                 NavigationBarItem(
                                                                         selected =
                                                                                 currentScreen ==
+                                                                                        "oscilloscope",
+                                                                        onClick = {
+                                                                                if (currentScreen == "lightmap") {
+                                                                                        flashlightController.stop()
+                                                                                }
+                                                                                currentScreen =
+                                                                                        "oscilloscope"
+                                                                        },
+                                                                        icon = { Text("📊") },
+                                                                        label = { Text("Scope") }
+                                                                )
+                                                                NavigationBarItem(
+                                                                        selected =
+                                                                                currentScreen ==
                                                                                         "settings",
                                                                         onClick = {
                                                                                 if (currentScreen == "lightmap") {
@@ -189,6 +204,13 @@ class MainActivity : ComponentActivity() {
                                                 "lightmap" ->
                                                         LightMapScreen(
                                                                 flashlightController = flashlightController,
+                                                                modifier =
+                                                                        Modifier.padding(
+                                                                                innerPadding
+                                                                        )
+                                                        )
+                                                "oscilloscope" ->
+                                                        OscilloscopeScreen(
                                                                 modifier =
                                                                         Modifier.padding(
                                                                                 innerPadding

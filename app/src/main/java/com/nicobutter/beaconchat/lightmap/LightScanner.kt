@@ -12,17 +12,28 @@ import kotlin.math.sqrt
 
 /**
  * LightScanner - Detecta pulsos luminosos de otros dispositivos BeaconChat
+ * Ahora con enfoque de osciloscopio para detección precisa de heartbeats
  * 
  * Analiza frames de cámara para:
- * - Detectar cambios súbitos de luminosidad (flashes)
+ * - Generar curva de intensidad en tiempo real (osciloscopio)
+ * - Detectar patrones de heartbeat con precisión quirúrgica
  * - Calcular posición aproximada del flash en el frame (ángulo)
  * - Estimar intensidad/distancia
- * - Reconocer patrones de heartbeat
  */
 class LightScanner : ImageAnalysis.Analyzer {
     
     private val _detectedDevices = MutableStateFlow<List<DetectedDevice>>(emptyList())
     val detectedDevices: StateFlow<List<DetectedDevice>> = _detectedDevices.asStateFlow()
+    
+    // Buffer de intensidad para osciloscopio (últimos N frames)
+    private val intensityBuffer = ArrayDeque<IntensityPoint>(OSCILLOSCOPE_BUFFER_SIZE)
+    
+    private val _signalData = MutableStateFlow<List<IntensityPoint>>(emptyList())
+    val signalData: StateFlow<List<IntensityPoint>> = _signalData.asStateFlow()
+    
+    // Estadísticas de señal
+    private val _signalStats = MutableStateFlow(SignalStats())
+    val signalStats: StateFlow<SignalStats> = _signalStats.asStateFlow()
     
     // Historial de brillos para detectar cambios
     private val brightnessHistory = ArrayDeque<BrightnessFrame>(HISTORY_SIZE)
@@ -32,6 +43,23 @@ class LightScanner : ImageAnalysis.Analyzer {
     
     // Última vez que se procesó un frame (para calcular FPS)
     private var lastFrameTime = 0L
+    private var frameCount = 0
+    private var lastFpsUpdate = 0L
+    
+    data class IntensityPoint(
+        val timestamp: Long,
+        val intensity: Int, // 0-255
+        val isPeak: Boolean = false,
+        val isValley: Boolean = false
+    )
+    
+    data class SignalStats(
+        val fps: Int = 0,
+        val avgIntensity: Int = 0,
+        val minIntensity: Int = 255,
+        val maxIntensity: Int = 0,
+        val noiseLevel: Int = 0
+    )
     
     data class BrightnessFrame(
         val timestamp: Long,
@@ -53,8 +81,8 @@ class LightScanner : ImageAnalysis.Analyzer {
         try {
             val currentTime = System.currentTimeMillis()
             
-            // Skip frames if processing is too slow (throttle to max 10 FPS)
-            if (currentTime - lastFrameTime < 100) {
+            // Skip frames if processing is too slow (throttle to max 15 FPS para mejor detección)
+            if (currentTime - lastFrameTime < 66) { // ~15 FPS
                 image.close()
                 return
             }
@@ -69,6 +97,24 @@ class LightScanner : ImageAnalysis.Analyzer {
             
             // Calcular brillo promedio general (con muestreo agresivo para performance)
             val avgBrightness = calculateAverageBrightness(data)
+            
+            // Agregar al buffer del osciloscopio
+            val intensityPoint = IntensityPoint(
+                timestamp = currentTime,
+                intensity = avgBrightness
+            )
+            intensityBuffer.addLast(intensityPoint)
+            if (intensityBuffer.size > OSCILLOSCOPE_BUFFER_SIZE) {
+                intensityBuffer.removeFirst()
+            }
+            
+            // Detectar picos y valles en el buffer del osciloscopio
+            if (intensityBuffer.size >= 5) {
+                markPeaksAndValleys()
+            }
+            
+            // Actualizar StateFlow para el mini-osciloscopio
+            _signalData.value = intensityBuffer.toList()
             
             // Calcular brillo en centro (para referencia)
             val centerBrightness = calculateCenterBrightness(data, width, height, rowStride)
@@ -99,6 +145,9 @@ class LightScanner : ImageAnalysis.Analyzer {
             if (brightnessHistory.size % 5 == 0) {
                 recognizePatterns()
             }
+            
+            // Actualizar estadísticas de señal
+            updateSignalStats(currentTime)
             
             lastFrameTime = currentTime
             
@@ -195,14 +244,74 @@ class LightScanner : ImageAnalysis.Analyzer {
         return Pair(maxX, maxY)
     }
     
+    private fun markPeaksAndValleys() {
+        if (intensityBuffer.size < 5) return
+        
+        val recent = intensityBuffer.takeLast(5).toMutableList()
+        val middle = recent[2]
+        
+        // Detectar pico (máximo local)
+        val isPeak = middle.intensity > recent[1].intensity && 
+                     middle.intensity > recent[3].intensity &&
+                     middle.intensity > recent[0].intensity &&
+                     middle.intensity > recent[4].intensity
+        
+        // Detectar valle (mínimo local)
+        val isValley = middle.intensity < recent[1].intensity && 
+                       middle.intensity < recent[3].intensity &&
+                       middle.intensity < recent[0].intensity &&
+                       middle.intensity < recent[4].intensity
+        
+        if (isPeak || isValley) {
+            val index = intensityBuffer.size - 3
+            intensityBuffer[index] = middle.copy(isPeak = isPeak, isValley = isValley)
+        }
+    }
+    
+    private fun updateSignalStats(currentTime: Long) {
+        if (intensityBuffer.isEmpty()) return
+        
+        // Calcular FPS cada segundo
+        val fps = if (currentTime - lastFpsUpdate >= 1000) {
+            val calculatedFps = frameCount
+            frameCount++
+            lastFpsUpdate = currentTime
+            calculatedFps
+        } else {
+            frameCount++
+            _signalStats.value.fps
+        }
+        
+        // Calcular estadísticas de señal
+        val intensities = intensityBuffer.map { it.intensity }
+        val avg = intensities.average().toInt()
+        val min = intensities.minOrNull() ?: 0
+        val max = intensities.maxOrNull() ?: 255
+        
+        // Calcular nivel de ruido (desviación estándar)
+        val variance = intensities.map { (it - avg) * (it - avg) }.average()
+        val noise = kotlin.math.sqrt(variance).toInt()
+        
+        _signalStats.value = SignalStats(
+            fps = fps,
+            avgIntensity = avg,
+            minIntensity = min,
+            maxIntensity = max,
+            noiseLevel = noise
+        )
+    }
+    
     private fun detectFlashes() {
-        if (brightnessHistory.size < 3) return
+        if (brightnessHistory.size < 5) return
         
         val latest = brightnessHistory.last()
-        val previous = brightnessHistory[brightnessHistory.size - 2]
         
-        // Detectar subida brusca (inicio de flash)
-        val increase = latest.avgBrightness - previous.avgBrightness
+        // Calcular promedio de los últimos 4 frames (excluyendo el actual)
+        val recentFrames = brightnessHistory.takeLast(5).dropLast(1)
+        val avgRecent = recentFrames.map { it.avgBrightness }.average().toInt()
+        
+        // Detectar subida brusca comparando con el promedio reciente (reduce ruido)
+        val increase = latest.avgBrightness - avgRecent
         
         if (increase > FLASH_THRESHOLD) {
             val flashEvent = FlashEvent(
@@ -214,7 +323,7 @@ class LightScanner : ImageAnalysis.Analyzer {
             
             patternBuffer.add(flashEvent)
             
-            Log.d(TAG, "Flash detected! Intensity: ${latest.avgBrightness}, Position: (${latest.flashPositionX}, ${latest.flashPositionY})")
+            Log.d(TAG, "Flash detected! Intensity: ${latest.avgBrightness} (avg recent: $avgRecent), Position: (${latest.flashPositionX}, ${latest.flashPositionY})")
             
             // Limpiar buffer viejo (mantener solo últimos 5 segundos)
             val cutoff = System.currentTimeMillis() - 5000
@@ -349,12 +458,16 @@ class LightScanner : ImageAnalysis.Analyzer {
     fun reset() {
         brightnessHistory.clear()
         patternBuffer.clear()
+        intensityBuffer.clear()
         _detectedDevices.value = emptyList()
+        _signalData.value = emptyList()
+        _signalStats.value = SignalStats()
     }
     
     companion object {
         private const val TAG = "LightScanner"
         private const val HISTORY_SIZE = 10
-        private const val FLASH_THRESHOLD = 40 // Umbral de cambio de brillo para detectar flash
+        private const val FLASH_THRESHOLD = 20 // Umbral más bajo para detectar flashes más débiles
+        private const val OSCILLOSCOPE_BUFFER_SIZE = 150 // ~5 segundos a 30 FPS para el mini-osciloscopio
     }
 }

@@ -1,6 +1,8 @@
 package com.nicobutter.beaconchat.ui.screens
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -14,10 +16,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -89,9 +93,19 @@ fun MeshScreen(
                     }
             )
 
+    // Bluetooth enable launcher
+    val bluetoothEnableLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // Actualizar estado después de intentar activar Bluetooth
+        meshController.updateBluetoothState()
+    }
+
     LaunchedEffect(Unit) {
         if (!hasPermissions) {
             launcher.launch(permissionsToRequest)
+        } else {
+            meshController.updateBluetoothState()
         }
     }
 
@@ -108,10 +122,10 @@ fun MeshScreen(
                 peer = selectedPeer!!,
                 messages =
                         messages.filter {
-                            (it.senderName == selectedPeer!!.callsign && !it.isFromMe) ||
-                                    (it.isFromMe) // In a real app we would filter by recipient too,
-                            // but for now we show all my sent messages here
-                            // or need a way to link sent msg to peer
+                            // Mensajes enviados a este peer por mí
+                            (it.isFromMe && it.recipientId == selectedPeer!!.id) ||
+                            // Mensajes recibidos de este peer
+                            (it.senderId == selectedPeer!!.id && !it.isFromMe)
                         },
                 onSendMessage = { content ->
                     meshController.sendMessage(selectedPeer!!.id, content, callsign)
@@ -137,18 +151,27 @@ fun MeshScreen(
                                                     MaterialTheme.colorScheme.onPrimaryContainer
                                     ),
                             actions = {
-                                if (bluetoothEnabled) {
-                                    Icon(
-                                            Icons.Default.Share,
-                                            contentDescription = "Bluetooth On",
-                                            tint = MaterialTheme.colorScheme.primary
-                                    )
-                                } else {
-                                    Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "Bluetooth Off",
-                                            tint = MaterialTheme.colorScheme.error
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (bluetoothEnabled) {
+                                        Icon(
+                                                Icons.Default.CheckCircle,
+                                                contentDescription = "Bluetooth On",
+                                                tint = Color(0xFF2E7D32)
+                                        )
+                                    } else {
+                                        Icon(
+                                                Icons.Default.Warning,
+                                                contentDescription = "Bluetooth Off",
+                                                tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    if (isScanning) {
+                                        CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp
+                                        )
+                                    }
                                 }
                             }
                     )
@@ -221,7 +244,37 @@ fun MeshScreen(
                     }
                 } else if (!bluetoothEnabled) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Activa Bluetooth para usar el Radar.")
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = "Bluetooth Off",
+                                    modifier = Modifier.size(64.dp),
+                                    tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                    "Bluetooth desactivado",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                    "Activa Bluetooth para usar el Mesh Radar",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                    onClick = {
+                                        val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                                        bluetoothEnableLauncher.launch(enableBtIntent)
+                                    }
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Activar Bluetooth")
+                            }
+                        }
                     }
                 } else if (peers.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
