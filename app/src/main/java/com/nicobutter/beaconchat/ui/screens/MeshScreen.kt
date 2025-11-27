@@ -306,7 +306,7 @@ fun PeerItem(peer: MeshPeer, onClick: () -> Unit) {
     Card(
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.clickable(onClick = onClick)
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
         Row(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
