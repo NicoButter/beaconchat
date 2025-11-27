@@ -53,6 +53,12 @@ class LightScanner : ImageAnalysis.Analyzer {
         try {
             val currentTime = System.currentTimeMillis()
             
+            // Skip frames if processing is too slow (throttle to max 10 FPS)
+            if (currentTime - lastFrameTime < 100) {
+                image.close()
+                return
+            }
+            
             // Extraer plano Y (luminancia)
             val buffer = image.planes[0].buffer
             val data = toByteArray(buffer)
@@ -61,7 +67,7 @@ class LightScanner : ImageAnalysis.Analyzer {
             val height = image.height
             val rowStride = image.planes[0].rowStride
             
-            // Calcular brillo promedio general
+            // Calcular brillo promedio general (con muestreo agresivo para performance)
             val avgBrightness = calculateAverageBrightness(data)
             
             // Calcular brillo en centro (para referencia)
@@ -89,16 +95,11 @@ class LightScanner : ImageAnalysis.Analyzer {
                 detectFlashes()
             }
             
-            // Intentar reconocer patrones (heartbeats)
-            recognizePatterns()
-            
-            // Calcular FPS para debug
-            if (lastFrameTime > 0) {
-                val fps = 1000.0 / (currentTime - lastFrameTime)
-                if (currentTime - lastFrameTime > 1000) {
-                    Log.d(TAG, "FPS: %.1f, Avg brightness: $avgBrightness".format(fps))
-                }
+            // Intentar reconocer patrones (heartbeats) - solo cada 5 frames
+            if (brightnessHistory.size % 5 == 0) {
+                recognizePatterns()
             }
+            
             lastFrameTime = currentTime
             
         } catch (e: Exception) {
@@ -110,10 +111,11 @@ class LightScanner : ImageAnalysis.Analyzer {
     
     private fun calculateAverageBrightness(data: ByteArray): Int {
         var sum = 0L
-        for (i in data.indices step 10) { // Muestreo (cada 10 píxeles para performance)
+        // Muestreo mucho más agresivo: cada 50 píxeles (antes era 10)
+        for (i in data.indices step 50) {
             sum += (data[i].toInt() and 0xFF)
         }
-        return (sum / (data.size / 10)).toInt()
+        return (sum / (data.size / 50)).toInt()
     }
     
     private fun calculateCenterBrightness(
@@ -150,8 +152,8 @@ class LightScanner : ImageAnalysis.Analyzer {
         height: Int,
         rowStride: Int
     ): Pair<Float, Float> {
-        // Dividir imagen en grid 5x5 y encontrar región más brillante
-        val gridSize = 5
+        // Reducir grid de 5x5 a 3x3 para mejor performance
+        val gridSize = 3
         val cellWidth = width / gridSize
         val cellHeight = height / gridSize
         
@@ -169,8 +171,9 @@ class LightScanner : ImageAnalysis.Analyzer {
                 val endX = minOf(startX + cellWidth, width)
                 val endY = minOf(startY + cellHeight, height)
                 
-                for (y in startY until endY step 5) {
-                    for (x in startX until endX step 5) {
+                // Muestreo más agresivo: cada 10 píxeles (antes era 5)
+                for (y in startY until endY step 10) {
+                    for (x in startX until endX step 10) {
                         val index = y * rowStride + x
                         if (index < data.size) {
                             sum += (data[index].toInt() and 0xFF)

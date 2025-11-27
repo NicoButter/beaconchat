@@ -14,6 +14,7 @@ class FlashlightController(context: Context) {
     private var cameraId: String? = null
     private val transmissionMutex = Mutex()
     private var isFlashlightOn = false
+    @Volatile private var isStopped = false
 
     // Callback para debugging visual
     var onStateChange: ((Boolean, Int, Int) -> Unit)? = null
@@ -46,12 +47,20 @@ class FlashlightController(context: Context) {
         transmissionMutex.withLock {
             Log.d(TAG, "Starting transmission with ${timings.size} timings")
 
+            // Reset stop flag
+            isStopped = false
+
             withContext(Dispatchers.IO) {
                 try {
                     // Ensure flashlight is off before starting
                     ensureFlashlightOff(id)
 
                     for (i in timings.indices) {
+                        if (isStopped) {
+                            Log.d(TAG, "Transmission stopped at step $i")
+                            break
+                        }
+
                         val duration = timings[i]
                         val isTurnOn = i % 2 == 0 // Even indices are ON, Odd are OFF
 
@@ -75,6 +84,7 @@ class FlashlightController(context: Context) {
                     Log.d(TAG, "Transmission complete, ensuring flashlight is off")
                     ensureFlashlightOff(id)
                     onStateChange?.invoke(false, timings.size, timings.size)
+                    isStopped = false // Reset flag
                 }
             }
         }
@@ -114,6 +124,12 @@ class FlashlightController(context: Context) {
             Log.e(TAG, "Error ensuring flashlight is off", e)
             e.printStackTrace()
         }
+    }
+
+    fun stop() {
+        isStopped = true
+        // Immediately turn off flashlight
+        cameraId?.let { ensureFlashlightOff(it) }
     }
 
     fun cleanup() {

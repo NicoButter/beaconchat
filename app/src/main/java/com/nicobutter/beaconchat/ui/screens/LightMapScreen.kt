@@ -269,12 +269,17 @@ private fun CameraPreview(
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
                 
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
+                val preview = Preview.Builder()
+                    .build()
+                    .also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
                 
+                // Configuración optimizada para performance
                 val imageAnalysis = ImageAnalysis.Builder()
+                    .setTargetResolution(android.util.Size(640, 480)) // Resolución baja para mejor performance
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setImageQueueDepth(1) // Solo mantener 1 frame en cola
                     .build()
                     .also {
                         it.setAnalyzer(Executors.newSingleThreadExecutor(), lightScanner)
@@ -306,13 +311,13 @@ private fun RadarOverlay(
     devices: List<DetectedDevice>,
     modifier: Modifier = Modifier
 ) {
-    // Animación de escaneo
+    // Animación de escaneo más lenta (4 segundos en lugar de 3)
     val infiniteTransition = rememberInfiniteTransition(label = "radar")
     val radarAngle by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(3000, easing = LinearEasing),
+            animation = tween(4000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "radarAngle"
@@ -322,11 +327,11 @@ private fun RadarOverlay(
         val center = Offset(size.width / 2, size.height / 2)
         val maxRadius = minOf(size.width, size.height) / 2 * 0.8f
         
-        // Círculos concéntricos
-        for (i in 1..3) {
+        // Solo 2 círculos concéntricos (antes eran 3)
+        for (i in 1..2) {
             drawCircle(
                 color = Color.Green.copy(alpha = 0.3f),
-                radius = maxRadius * i / 3,
+                radius = maxRadius * i / 2,
                 center = center,
                 style = Stroke(width = 2f)
             )
@@ -345,8 +350,8 @@ private fun RadarOverlay(
             strokeWidth = 3f
         )
         
-        // Puntos de dispositivos detectados
-        devices.forEach { device ->
+        // Puntos de dispositivos detectados (máximo 5 para no saturar)
+        devices.take(5).forEach { device ->
             val angleRad = Math.toRadians(device.angle.toDouble())
             val distanceRatio = (10 - device.estimatedDistance) / 10 // Normalizar
             val pointRadius = maxRadius * distanceRatio.coerceIn(0.2f, 0.9f)
@@ -363,23 +368,15 @@ private fun RadarOverlay(
                     device.intensity > 120 -> Color.Yellow
                     else -> Color.Green
                 },
-                radius = 12f,
+                radius = 10f,
                 center = point
-            )
-            
-            // Pulso animado
-            drawCircle(
-                color = Color.White.copy(alpha = 0.3f),
-                radius = 20f,
-                center = point,
-                style = Stroke(width = 2f)
             )
         }
         
         // Centro (este dispositivo)
         drawCircle(
             color = Color.Cyan,
-            radius = 10f,
+            radius = 8f,
             center = center
         )
     }

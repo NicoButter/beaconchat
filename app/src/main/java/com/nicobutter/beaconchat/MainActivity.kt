@@ -69,6 +69,9 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "transmit",
                                                                         onClick = {
+                                                                                if (currentScreen == "lightmap") {
+                                                                                        flashlightController.stop()
+                                                                                }
                                                                                 currentScreen =
                                                                                         "transmit"
                                                                         },
@@ -80,6 +83,9 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "receive",
                                                                         onClick = {
+                                                                                if (currentScreen == "lightmap") {
+                                                                                        flashlightController.stop()
+                                                                                }
                                                                                 currentScreen =
                                                                                         "receive"
                                                                         },
@@ -91,6 +97,9 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "mesh",
                                                                         onClick = {
+                                                                                if (currentScreen == "lightmap") {
+                                                                                        flashlightController.stop()
+                                                                                }
                                                                                 currentScreen =
                                                                                         "mesh"
                                                                         },
@@ -113,6 +122,9 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "settings",
                                                                         onClick = {
+                                                                                if (currentScreen == "lightmap") {
+                                                                                        flashlightController.stop()
+                                                                                }
                                                                                 currentScreen =
                                                                                         "settings"
                                                                         },
@@ -127,9 +139,15 @@ class MainActivity : ComponentActivity() {
                                                 "welcome" ->
                                                         WelcomeScreen(
                                                                 onNavigateToTransmit = {
+                                                                        if (currentScreen == "lightmap") {
+                                                                                flashlightController.stop()
+                                                                        }
                                                                         currentScreen = "transmit"
                                                                 },
                                                                 onNavigateToReceive = {
+                                                                        if (currentScreen == "lightmap") {
+                                                                                flashlightController.stop()
+                                                                        }
                                                                         currentScreen = "receive"
                                                                 },
                                                                 modifier =
@@ -193,19 +211,13 @@ class MainActivity : ComponentActivity() {
 
         override fun onPause() {
                 super.onPause()
-                // Ensure all controllers are cleaned up when app goes to background
+                // Ensure flashlight is cleaned up when app goes to background
                 flashlightController.cleanup()
-                vibrationController.cleanup()
-                soundController.cleanup()
-                meshController.cleanup()
         }
 
         override fun onDestroy() {
                 super.onDestroy()
-                // Ensure all controllers are cleaned up when app is destroyed
+                // Ensure flashlight is cleaned up when app is destroyed
                 flashlightController.cleanup()
-                vibrationController.cleanup()
-                soundController.cleanup()
-                meshController.cleanup()
         }
 }
