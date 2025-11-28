@@ -74,4 +74,4 @@ Decodifica señales del entorno:
 - 🐙 GitHub: [@nicobutter](https://github.com/nicobutter)
 
 ---
-*Desarrollado como parte de los proyectos 2024.*
+Vamos a salvar vidas!*
