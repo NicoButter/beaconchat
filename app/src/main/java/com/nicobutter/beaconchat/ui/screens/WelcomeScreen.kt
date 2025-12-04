@@ -1,5 +1,6 @@
 package com.nicobutter.beaconchat.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
@@ -8,7 +9,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.nicobutter.beaconchat.R
 
 
 @Composable
@@ -22,12 +25,11 @@ fun WelcomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
         ) {
-                // Icon placeholder
-                Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "BeaconChat Icon",
-                        modifier = Modifier.size(96.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                // Logo de BeaconChat
+                Image(
+                        painter = painterResource(id = R.drawable.logo),
+                        contentDescription = "BeaconChat Logo",
+                        modifier = Modifier.size(120.dp)
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))

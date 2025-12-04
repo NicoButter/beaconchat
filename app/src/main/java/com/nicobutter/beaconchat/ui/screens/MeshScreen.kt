@@ -109,6 +109,9 @@ fun MeshScreen(
         }
     }
 
+    val isSending by meshController.isSending.collectAsState()
+    val lastError by meshController.lastError.collectAsState()
+
     // Auto-start if permissions granted
     LaunchedEffect(hasPermissions, bluetoothEnabled) {
         if (hasPermissions && bluetoothEnabled) {
@@ -127,6 +130,8 @@ fun MeshScreen(
                             // Mensajes recibidos de este peer
                             (it.senderId == selectedPeer!!.id && !it.isFromMe)
                         },
+                isSending = isSending,
+                lastError = lastError,
                 onSendMessage = { content ->
                     meshController.sendMessage(selectedPeer!!.id, content, callsign)
                 },
@@ -323,6 +328,11 @@ fun PeerItem(peer: MeshPeer, onClick: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(
+                        text = "Toca para chatear",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                )
             }
 
             Column(horizontalAlignment = Alignment.End) {
@@ -352,6 +362,15 @@ fun PeerItem(peer: MeshPeer, onClick: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            
+            // Ícono de chat
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                    Icons.Default.Send,
+                    contentDescription = "Chat",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+            )
         }
     }
 }
@@ -361,6 +380,8 @@ fun PeerItem(peer: MeshPeer, onClick: () -> Unit) {
 fun ChatScreen(
         peer: MeshPeer,
         messages: List<ChatMessage>,
+        isSending: Boolean = false,
+        lastError: String? = null,
         onSendMessage: (String) -> Unit,
         onBack: () -> Unit
 ) {
@@ -378,10 +399,19 @@ fun ChatScreen(
                 TopAppBar(
                         title = {
                             Column {
-                                Text(
-                                        text = peer.callsign,
-                                        style = MaterialTheme.typography.titleMedium
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                            text = peer.callsign,
+                                            style = MaterialTheme.typography.titleMedium
+                                    )
+                                    if (isSending) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp
+                                        )
+                                    }
+                                }
                                 Text(
                                         text = peer.name,
                                         style = MaterialTheme.typography.bodySmall,
@@ -402,32 +432,69 @@ fun ChatScreen(
                 )
             },
             bottomBar = {
-                Row(
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                            value = messageText,
-                            onValueChange = { messageText = it },
-                            modifier = Modifier.weight(1f),
-                            placeholder = { Text("Mensaje...") },
-                            shape = RoundedCornerShape(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(
-                            onClick = {
-                                if (messageText.isNotBlank()) {
-                                    onSendMessage(messageText)
-                                    messageText = ""
-                                }
-                            },
-                            enabled = messageText.isNotBlank(),
-                            colors =
-                                    IconButtonDefaults.iconButtonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                    )
-                    ) { Icon(Icons.Filled.Send, contentDescription = "Send") }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Mostrar error si hay uno
+                    if (lastError != null) {
+                        Row(
+                                modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.errorContainer)
+                                        .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = "Error",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                    text = lastError,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                    
+                    Row(
+                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                                value = messageText,
+                                onValueChange = { messageText = it },
+                                modifier = Modifier.weight(1f),
+                                placeholder = { Text("Mensaje...") },
+                                shape = RoundedCornerShape(24.dp),
+                                enabled = !isSending
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                                onClick = {
+                                    if (messageText.isNotBlank()) {
+                                        onSendMessage(messageText)
+                                        messageText = ""
+                                    }
+                                },
+                                enabled = messageText.isNotBlank() && !isSending,
+                                colors =
+                                        IconButtonDefaults.iconButtonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                        )
+                        ) { 
+                            if (isSending) {
+                                CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                Icon(Icons.Filled.Send, contentDescription = "Send")
+                            }
+                        }
+                    }
                 }
             }
     ) { paddingValues ->

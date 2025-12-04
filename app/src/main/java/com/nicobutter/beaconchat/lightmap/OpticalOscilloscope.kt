@@ -57,10 +57,10 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
         try {
             val currentTime = System.currentTimeMillis()
             
-            // Extraer intensidad promedio del frame
+            // Extraer intensidad promedio del frame (ROI centrado como LightDetector)
             val buffer = image.planes[0].buffer
             val data = toByteArray(buffer)
-            val intensity = calculateAverageIntensity(data)
+            val intensity = calculateCenterIntensity(image, data)
             
             // Crear punto de intensidad
             val point = IntensityPoint(
@@ -107,13 +107,35 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
         }
     }
     
-    private fun calculateAverageIntensity(data: ByteArray): Int {
+    private fun calculateCenterIntensity(image: ImageProxy, data: ByteArray): Int {
+        // Usar la misma técnica que LightDetector para mejor detección
+        val width = image.width
+        val height = image.height
+        val centerX = width / 2
+        val centerY = height / 2
+        val cropSize = minOf(width, height) / 6
+
         var sum = 0L
-        // Muestreo cada 20 píxeles para mejor performance
-        for (i in data.indices step 20) {
-            sum += (data[i].toInt() and 0xFF)
+        var count = 0
+
+        val startX = maxOf(0, centerX - cropSize / 2)
+        val startY = maxOf(0, centerY - cropSize / 2)
+        val endX = minOf(width, centerX + cropSize / 2)
+        val endY = minOf(height, centerY + cropSize / 2)
+
+        val rowStride = image.planes[0].rowStride
+
+        for (y in startY until endY) {
+            for (x in startX until endX) {
+                val index = y * rowStride + x
+                if (index < data.size) {
+                    sum += (data[index].toInt() and 0xFF)
+                    count++
+                }
+            }
         }
-        return (sum / (data.size / 20)).toInt().coerceIn(0, 255)
+
+        return if (count > 0) (sum / count).toInt().coerceIn(0, 255) else 0
     }
     
     private fun markPeaksAndValleys() {
@@ -200,6 +222,8 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
  */
 class PulseDetector {
     private val pulseHistory = mutableListOf<Pulse>()
+    private val intensityHistory = ArrayDeque<Int>()
+    private val historySize = 30 // Últimos 30 frames para calcular umbral
     
     data class Pulse(
         val startTime: Long,
@@ -217,9 +241,26 @@ class PulseDetector {
     fun detectPulses(signal: List<OpticalOscilloscope.IntensityPoint>): List<Pulse> {
         val pulses = mutableListOf<Pulse>()
         
-        // Calcular umbral dinámico (promedio de intensidad)
-        val avgIntensity = signal.map { it.intensity }.average().toInt()
-        val threshold = avgIntensity + 20 // Un poco por encima del promedio
+        // Actualizar historial de intensidades para umbral dinámico
+        signal.forEach { point ->
+            intensityHistory.addLast(point.intensity)
+            if (intensityHistory.size > historySize) {
+                intensityHistory.removeFirst()
+            }
+        }
+        
+        // Calcular umbral dinámico basado en min/max como LightDetector
+        val min = intensityHistory.minOrNull() ?: 0
+        val max = intensityHistory.maxOrNull() ?: 255
+        
+        // Si hay suficiente rango dinámico, usar umbral en el medio
+        // Si no, usar un umbral basado en promedio
+        val threshold = if (max - min > 20) {
+            (max + min) / 2
+        } else {
+            val avg = intensityHistory.average().toInt()
+            avg + 10
+        }
         
         var inPulse = false
         var pulseStart = 0L
@@ -278,5 +319,6 @@ class PulseDetector {
     
     fun reset() {
         pulseHistory.clear()
+        intensityHistory.clear()
     }
 }

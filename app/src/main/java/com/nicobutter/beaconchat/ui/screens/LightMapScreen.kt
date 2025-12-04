@@ -97,6 +97,16 @@ fun LightMapScreen(
         }
     }
     
+    // Limpiar recursos al salir de la pantalla
+    DisposableEffect(Unit) {
+        onDispose {
+            // Detener heartbeat y limpiar flash
+            isHeartbeatActive = false
+            isScanningActive = false
+            flashlightController.cleanup()
+        }
+    }
+    
     Column(modifier = modifier.fillMaxSize()) {
         // Header
         Card(
@@ -174,18 +184,25 @@ fun LightMapScreen(
         
         // Radar visual
         if (isScanningActive && hasCameraPermission) {
-            Box(modifier = Modifier.weight(1f)) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
                 // Preview de cámara (oculto, solo para análisis)
                 CameraPreview(
                     lightScanner = lightScanner,
                     lifecycleOwner = lifecycleOwner,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.size(1.dp) // Oculto pero activo
                 )
                 
-                // Radar overlay
+                // Radar overlay con tamaño controlado
                 RadarOverlay(
                     devices = detectedDevices,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f) // Mantener cuadrado
+                        .align(Alignment.Center)
                 )
             }
         } else {
@@ -280,6 +297,14 @@ private fun CameraPreview(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+    
+    // Liberar cámara cuando se desmonta el composable
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraProvider?.unbindAll()
+        }
+    }
     
     AndroidView(
         factory = { ctx ->
@@ -287,7 +312,8 @@ private fun CameraPreview(
             val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
             
             cameraProviderFuture.addListener({
-                val cameraProvider = cameraProviderFuture.get()
+                val provider = cameraProviderFuture.get()
+                cameraProvider = provider
                 
                 val preview = Preview.Builder()
                     .build()
@@ -308,8 +334,8 @@ private fun CameraPreview(
                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                 
                 try {
-                    cameraProvider.unbindAll()
-                    val camera = cameraProvider.bindToLifecycle(
+                    provider.unbindAll()
+                    val camera = provider.bindToLifecycle(
                         lifecycleOwner,
                         cameraSelector,
                         preview,

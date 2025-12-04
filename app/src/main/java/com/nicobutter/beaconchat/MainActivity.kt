@@ -39,6 +39,13 @@ class MainActivity : ComponentActivity() {
         private lateinit var meshController: BLEMeshController
         private lateinit var userPreferences: UserPreferences
 
+        // Función para limpiar todos los controladores al cambiar de pantalla
+        private fun cleanupControllers() {
+                flashlightController.cleanup()
+                vibrationController.cleanup()
+                soundController.cleanup()
+        }
+
         override fun onCreate(savedInstanceState: Bundle?) {
                 super.onCreate(savedInstanceState)
 
@@ -70,9 +77,7 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "transmit",
                                                                         onClick = {
-                                                                                if (currentScreen == "lightmap") {
-                                                                                        flashlightController.stop()
-                                                                                }
+                                                                                cleanupControllers()
                                                                                 currentScreen =
                                                                                         "transmit"
                                                                         },
@@ -84,9 +89,7 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "receive",
                                                                         onClick = {
-                                                                                if (currentScreen == "lightmap") {
-                                                                                        flashlightController.stop()
-                                                                                }
+                                                                                cleanupControllers()
                                                                                 currentScreen =
                                                                                         "receive"
                                                                         },
@@ -98,9 +101,7 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "mesh",
                                                                         onClick = {
-                                                                                if (currentScreen == "lightmap") {
-                                                                                        flashlightController.stop()
-                                                                                }
+                                                                                cleanupControllers()
                                                                                 currentScreen =
                                                                                         "mesh"
                                                                         },
@@ -112,6 +113,7 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "lightmap",
                                                                         onClick = {
+                                                                                cleanupControllers()
                                                                                 currentScreen =
                                                                                         "lightmap"
                                                                         },
@@ -123,9 +125,7 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "oscilloscope",
                                                                         onClick = {
-                                                                                if (currentScreen == "lightmap") {
-                                                                                        flashlightController.stop()
-                                                                                }
+                                                                                cleanupControllers()
                                                                                 currentScreen =
                                                                                         "oscilloscope"
                                                                         },
@@ -137,9 +137,7 @@ class MainActivity : ComponentActivity() {
                                                                                 currentScreen ==
                                                                                         "settings",
                                                                         onClick = {
-                                                                                if (currentScreen == "lightmap") {
-                                                                                        flashlightController.stop()
-                                                                                }
+                                                                                cleanupControllers()
                                                                                 currentScreen =
                                                                                         "settings"
                                                                         },
@@ -154,15 +152,11 @@ class MainActivity : ComponentActivity() {
                                                 "welcome" ->
                                                         WelcomeScreen(
                                                                 onNavigateToTransmit = {
-                                                                        if (currentScreen == "lightmap") {
-                                                                                flashlightController.stop()
-                                                                        }
+                                                                        cleanupControllers()
                                                                         currentScreen = "transmit"
                                                                 },
                                                                 onNavigateToReceive = {
-                                                                        if (currentScreen == "lightmap") {
-                                                                                flashlightController.stop()
-                                                                        }
+                                                                        cleanupControllers()
                                                                         currentScreen = "receive"
                                                                 },
                                                                 modifier =
@@ -233,13 +227,13 @@ class MainActivity : ComponentActivity() {
 
         override fun onPause() {
                 super.onPause()
-                // Ensure flashlight is cleaned up when app goes to background
-                flashlightController.cleanup()
+                // Ensure all controllers are cleaned up when app goes to background
+                cleanupControllers()
         }
 
         override fun onDestroy() {
                 super.onDestroy()
-                // Ensure flashlight is cleaned up when app is destroyed
-                flashlightController.cleanup()
+                // Ensure all controllers are cleaned up when app is destroyed
+                cleanupControllers()
         }
 }

@@ -46,6 +46,16 @@ class BLEMeshController(private val context: Context) {
 
     private val _bluetoothEnabled = MutableStateFlow(bluetoothAdapter?.isEnabled == true)
     val bluetoothEnabled: StateFlow<Boolean> = _bluetoothEnabled.asStateFlow()
+    
+    private val _isSending = MutableStateFlow(false)
+    val isSending: StateFlow<Boolean> = _isSending.asStateFlow()
+    
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError.asStateFlow()
+    
+    fun clearError() {
+        _lastError.value = null
+    }
 
     companion object {
         private const val TAG = "BLEMeshController"
@@ -159,11 +169,25 @@ class BLEMeshController(private val context: Context) {
 
     /** Send a message to a peer */
     fun sendMessage(peerAddress: String, message: String, myCallsign: String) {
-        if (!checkBluetoothPermissions()) return
+        if (!checkBluetoothPermissions()) {
+            Log.e(TAG, "Missing Bluetooth permissions for sendMessage")
+            _lastError.value = "Faltan permisos de Bluetooth"
+            return
+        }
+        
+        _isSending.value = true
+        _lastError.value = null
 
         try {
-            val device = bluetoothAdapter?.getRemoteDevice(peerAddress) ?: return
-            Log.d(TAG, "Connecting to $peerAddress to send message")
+            val device = bluetoothAdapter?.getRemoteDevice(peerAddress)
+            if (device == null) {
+                Log.e(TAG, "Could not get remote device for address: $peerAddress")
+                _lastError.value = "No se pudo conectar al dispositivo"
+                _isSending.value = false
+                return
+            }
+            
+            Log.d(TAG, "Connecting to $peerAddress to send message: $message")
 
             // Connect to GATT Server on peer
             device.connectGatt(
@@ -175,20 +199,33 @@ class BLEMeshController(private val context: Context) {
                                 status: Int,
                                 newState: Int
                         ) {
+                            Log.d(TAG, "Connection state changed: status=$status, newState=$newState")
                             if (newState == BluetoothProfile.STATE_CONNECTED) {
                                 Log.d(TAG, "Connected to GATT server. Discovering services...")
                                 gatt?.discoverServices()
                             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                                 Log.d(TAG, "Disconnected from GATT server")
+                                _isSending.value = false
                                 gatt?.close()
                             }
                         }
 
                         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
+                            Log.d(TAG, "Services discovered with status: $status")
                             if (status == BluetoothGatt.GATT_SUCCESS) {
+                                val services = gatt?.services
+                                Log.d(TAG, "Available services: ${services?.map { it.uuid }}")
+                                
                                 val service = gatt?.getService(CHAT_SERVICE_UUID)
-                                val characteristic =
-                                        service?.getCharacteristic(MESSAGE_CHARACTERISTIC_UUID)
+                                if (service == null) {
+                                    Log.e(TAG, "Chat service not found! Available: ${services?.map { it.uuid }}")
+                                    _lastError.value = "Servicio de chat no encontrado en el peer"
+                                    _isSending.value = false
+                                    gatt?.disconnect()
+                                    return
+                                }
+                                
+                                val characteristic = service.getCharacteristic(MESSAGE_CHARACTERISTIC_UUID)
 
                                 if (characteristic != null) {
                                     // Format: "CALLSIGN:MESSAGE"
@@ -198,7 +235,7 @@ class BLEMeshController(private val context: Context) {
                                             BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
 
                                     val success = gatt.writeCharacteristic(characteristic)
-                                    Log.d(TAG, "Write characteristic status: $success")
+                                    Log.d(TAG, "Write characteristic initiated: $success")
 
                                     if (success) {
                                         // Add to local messages
@@ -214,12 +251,22 @@ class BLEMeshController(private val context: Context) {
                                         val currentMessages = _messages.value.toMutableList()
                                         currentMessages.add(chatMessage)
                                         _messages.value = currentMessages
+                                        Log.d(TAG, "Message added to local list")
+                                    } else {
+                                        _lastError.value = "Error al enviar mensaje"
+                                        _isSending.value = false
                                     }
                                 } else {
-                                    Log.e(TAG, "Message characteristic not found")
+                                    Log.e(TAG, "Message characteristic not found in service")
+                                    _lastError.value = "Característica de mensaje no encontrada"
+                                    _isSending.value = false
+                                    gatt.disconnect()
                                 }
                             } else {
                                 Log.w(TAG, "onServicesDiscovered received: $status")
+                                _lastError.value = "Error descubriendo servicios: $status"
+                                _isSending.value = false
+                                gatt?.disconnect()
                             }
                         }
 
@@ -228,14 +275,18 @@ class BLEMeshController(private val context: Context) {
                                 characteristic: BluetoothGattCharacteristic?,
                                 status: Int
                         ) {
+                            _isSending.value = false
                             if (status == BluetoothGatt.GATT_SUCCESS) {
-                                Log.d(TAG, "Message sent successfully")
+                                Log.d(TAG, "Message sent successfully!")
+                                _lastError.value = null
                             } else {
                                 Log.e(TAG, "Failed to send message. Status: $status")
+                                _lastError.value = "Error al escribir mensaje: $status"
                             }
                             gatt?.disconnect() // Disconnect after sending
                         }
-                    }
+                    },
+                    BluetoothDevice.TRANSPORT_LE // Forzar transporte LE
             )
         } catch (e: SecurityException) {
             Log.e(TAG, "Security exception sending message", e)
@@ -362,6 +413,8 @@ class BLEMeshController(private val context: Context) {
         stopScanning()
         _peers.value = emptyList()
         _messages.value = emptyList()
+        _isSending.value = false
+        _lastError.value = null
         Log.d(TAG, "Cleaned up")
     }
 
