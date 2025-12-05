@@ -68,6 +68,7 @@ enum class EncodingType {
  * @param userPreferences User preferences for customization
  * @param modifier Modifier for customizing the layout
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransmitterScreen(
     flashlightController: FlashlightController,
