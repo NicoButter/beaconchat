@@ -1,18 +1,30 @@
 package com.nicobutter.beaconchat.transceiver
 
+/**
+ * Encodes text into binary ASCII representation for transmission via light/sound signals.
+ *
+ * This class converts text characters to their 8-bit ASCII binary representation and
+ * generates timing sequences suitable for transmission through various mediums like
+ * flashlight, sound, or vibration.
+ */
 class BinaryEncoder {
     companion object {
-        private const val BIT_DURATION = 200L // ms - duración de cada bit (0 o 1)
-        private const val BYTE_SPACE = 400L // ms - pausa entre bytes (caracteres)
-        private const val WORD_SPACE = 800L // ms - pausa entre palabras
+        private const val BIT_DURATION = 200L // ms - duration of each bit (0 or 1)
+        private const val BYTE_SPACE = 400L // ms - pause between bytes (characters)
+        private const val WORD_SPACE = 800L // ms - pause between words
     }
 
-    /** Convierte un texto a su representación binaria ASCII (string legible) */
+    /**
+     * Converts text to its ASCII binary representation as a readable string.
+     *
+     * @param text The text to encode
+     * @return Binary representation with spaces between bytes and "/" for word separators
+     */
     fun encodeToString(text: String): String {
         return text
                 .map { char ->
                     if (char == ' ') {
-                        " / " // Separador de palabras
+                        " / " // Word separator
                     } else {
                         val asciiValue = char.code
                         asciiValue.toString(2).padStart(8, '0')
@@ -22,10 +34,13 @@ class BinaryEncoder {
     }
 
     /**
-     * Codifica un texto en ASCII binario. Cada carácter se convierte a su valor ASCII de 8 bits. Un
-     * '1' se representa con luz encendida, un '0' con luz apagada.
+     * Encodes text into ASCII binary format for transmission.
      *
-     * Retorna una lista de duraciones alternas (ON, OFF, ON, OFF...)
+     * Each character is converted to its 8-bit ASCII value. A '1' is represented
+     * with light/sound ON, a '0' with light/sound OFF.
+     *
+     * @param text The text to encode
+     * @return List of durations alternating between ON and OFF periods
      */
     fun encode(text: String): List<Long> {
         val timings = mutableListOf<Long>()
@@ -34,49 +49,49 @@ class BinaryEncoder {
             val char = text[i]
 
             if (char == ' ') {
-                // Espacio entre palabras - añadir pausa extra
+                // Space between words - add extra pause
                 if (timings.isNotEmpty() && timings.last() != WORD_SPACE) {
-                    // Si el último fue un ON, añadir OFF largo
+                    // If last was ON, add long OFF
                     timings.add(WORD_SPACE)
                 }
                 continue
             }
 
-            // Convertir carácter a binario de 8 bits
-            val asciiValue = char.code // Obtiene el valor ASCII
+            // Convert character to 8-bit binary
+            val asciiValue = char.code // Get ASCII value
             val binaryString = asciiValue.toString(2).padStart(8, '0')
 
-            // Transmitir cada bit
+            // Transmit each bit
             for (bit in binaryString) {
                 if (bit == '1') {
-                    // Bit 1: luz encendida
+                    // Bit 1: light/sound ON
                     timings.add(BIT_DURATION)
-                    timings.add(BIT_DURATION) // OFF entre bits
+                    timings.add(BIT_DURATION) // OFF between bits
                 } else {
-                    // Bit 0: luz apagada (pausa)
-                    // Para mantener el ritmo, añadimos una pausa de duración de bit
+                    // Bit 0: light/sound OFF (pause)
+                    // To maintain rhythm, add a pause of bit duration
                     if (timings.isNotEmpty()) {
-                        // Extender la última pausa
+                        // Extend the last pause
                         val lastIndex = timings.lastIndex
-                        if (lastIndex % 2 == 1) { // Si es una pausa (índice impar)
+                        if (lastIndex % 2 == 1) { // If it's a pause (odd index)
                             timings[lastIndex] = timings[lastIndex] + BIT_DURATION
                         } else {
                             timings.add(BIT_DURATION)
                         }
                     } else {
-                        timings.add(0L) // Empezar con OFF
+                        timings.add(0L) // Start with OFF
                         timings.add(BIT_DURATION)
                     }
                 }
             }
 
-            // Añadir pausa entre bytes (caracteres)
+            // Add pause between bytes (characters)
             if (i < text.length - 1) {
                 if (timings.isNotEmpty() && timings.lastIndex % 2 == 0) {
-                    // Si terminamos en ON, añadir OFF
+                    // If ended on ON, add OFF
                     timings.add(BYTE_SPACE)
                 } else if (timings.isNotEmpty()) {
-                    // Si terminamos en OFF, extender
+                    // If ended on OFF, extend
                     timings[timings.lastIndex] = timings[timings.lastIndex] + BYTE_SPACE
                 }
             }

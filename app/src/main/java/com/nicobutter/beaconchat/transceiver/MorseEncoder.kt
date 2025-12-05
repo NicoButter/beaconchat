@@ -1,10 +1,17 @@
 package com.nicobutter.beaconchat.transceiver
 
+/**
+ * Encodes text into Morse code timing sequences for transmission.
+ *
+ * This class converts text characters to their Morse code equivalents and generates
+ * precise timing sequences suitable for transmission through light, sound, or vibration.
+ * The timing follows standard Morse code conventions with configurable base durations.
+ */
 class MorseEncoder {
     companion object {
-    // Base time unit (DOT). Reduced from 200ms to 120ms to improve transmission speed
-    // while keeping reliability with typical phone cameras (30 fps => ~33ms/frame).
-    private const val DOT_DURATION = 120L // ms
+        // Base time unit (DOT). Reduced from 200ms to 120ms to improve transmission speed
+        // while keeping reliability with typical phone cameras (30 fps => ~33ms/frame).
+        private const val DOT_DURATION = 120L // ms
         private const val DASH_DURATION = DOT_DURATION * 3
         private const val SYMBOL_SPACE = DOT_DURATION // Space between dots/dashes
         private const val LETTER_SPACE = DOT_DURATION * 3 // Space between letters
@@ -66,13 +73,14 @@ class MorseEncoder {
     }
 
     /**
-     * Encodes a string into a list of durations (in milliseconds). The sequence alternates between
-     * ON and OFF states, starting with ON. If the first element is 0, it means start with OFF (e.g.
-     * space). However, for simplicity, we'll return a list of Pulse objects or just durations
-     * assuming ON/OFF toggle.
+     * Encodes text into a list of timing durations for transmission.
      *
-     * Let's return a List<Long> where even indices (0, 2, 4...) are ON durations and odd indices
-     * (1, 3, 5...) are OFF durations.
+     * Returns a List<Long> where even indices (0, 2, 4...) are ON durations
+     * and odd indices (1, 3, 5...) are OFF durations. This alternating pattern
+     * represents the Morse code sequence suitable for light/sound/vibration transmission.
+     *
+     * @param text The text to encode into Morse code timing sequence
+     * @return List of durations in milliseconds, alternating ON/OFF periods
      */
     fun encode(text: String): List<Long> {
         val timings = mutableListOf<Long>()

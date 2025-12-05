@@ -32,6 +32,15 @@ import com.nicobutter.beaconchat.ui.screens.TransmitterScreen
 import com.nicobutter.beaconchat.ui.screens.WelcomeScreen
 import com.nicobutter.beaconchat.ui.theme.BeaconChatTheme
 
+/**
+ * Main activity for BeaconChat application.
+ *
+ * This is the primary entry point and navigation hub for the BeaconChat app.
+ * Manages the lifecycle of all hardware controllers (flashlight, vibration, sound)
+ * and provides navigation between different communication screens including
+ * transmission, reception, mesh networking, light mapping, oscilloscope analysis,
+ * and settings. Implements proper resource cleanup to prevent hardware conflicts.
+ */
 class MainActivity : ComponentActivity() {
         private lateinit var flashlightController: FlashlightController
         private lateinit var vibrationController: VibrationController
@@ -39,13 +48,27 @@ class MainActivity : ComponentActivity() {
         private lateinit var meshController: BLEMeshController
         private lateinit var userPreferences: UserPreferences
 
-        // Función para limpiar todos los controladores al cambiar de pantalla
+        /**
+         * Cleans up all hardware controllers to prevent conflicts between screens.
+         *
+         * Ensures flashlight is turned off, vibration is stopped, and audio
+         * resources are released before switching to a different screen.
+         */
         private fun cleanupControllers() {
                 flashlightController.cleanup()
                 vibrationController.cleanup()
                 soundController.cleanup()
         }
 
+        /**
+         * Initializes the activity and sets up the Compose UI with navigation.
+         *
+         * Configures window insets for edge-to-edge display, initializes all
+         * hardware controllers and user preferences, and sets up the main
+         * navigation structure with bottom navigation bar and screen routing.
+         *
+         * @param savedInstanceState Bundle containing the activity's previously saved state
+         */
         override fun onCreate(savedInstanceState: Bundle?) {
                 super.onCreate(savedInstanceState)
 
@@ -225,12 +248,24 @@ class MainActivity : ComponentActivity() {
                 }
         }
 
+        /**
+         * Called when the activity is paused (goes to background).
+         *
+         * Ensures all hardware controllers are properly cleaned up when the
+         * app loses focus to prevent battery drain and hardware conflicts.
+         */
         override fun onPause() {
                 super.onPause()
                 // Ensure all controllers are cleaned up when app goes to background
                 cleanupControllers()
         }
 
+        /**
+         * Called when the activity is being destroyed.
+         *
+         * Performs final cleanup of all hardware controllers to ensure
+         * proper resource release when the app is terminated.
+         */
         override fun onDestroy() {
                 super.onDestroy()
                 // Ensure all controllers are cleaned up when app is destroyed

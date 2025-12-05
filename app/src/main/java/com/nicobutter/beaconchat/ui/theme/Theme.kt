@@ -12,12 +12,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
+/**
+ * Dark color scheme for BeaconChat theme.
+ *
+ * Uses Material Design's standard dark theme colors with purple and pink accents.
+ * Currently not used as the app forces light theme for consistency.
+ */
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
     secondary = PurpleGrey80,
     tertiary = Pink80
 )
 
+/**
+ * Light color scheme for BeaconChat theme.
+ *
+ * Custom light theme using BeaconChat's branded colors with deep purple primary
+ * and teal secondary colors, optimized for readability and visual appeal.
+ */
 private val LightColorScheme = lightColorScheme(
     primary = BeaconPrimary,
     secondary = BeaconSecondary,
@@ -31,6 +43,17 @@ private val LightColorScheme = lightColorScheme(
     onSurface = BeaconOnSurface
 )
 
+/**
+ * BeaconChat Material Design 3 theme provider.
+ *
+ * Applies consistent theming across the entire application using Material Design 3
+ * components. Currently forces light theme for optimal user experience and
+ * supports dynamic colors on Android 12+ devices.
+ *
+ * @param darkTheme Whether to use dark theme (currently forced to false for consistency)
+ * @param dynamicColor Whether to use dynamic colors from system theme (Android 12+ only)
+ * @param content The composable content to be themed
+ */
 @Composable
 fun BeaconChatTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),

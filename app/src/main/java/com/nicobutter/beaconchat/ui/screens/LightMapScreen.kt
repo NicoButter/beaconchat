@@ -48,6 +48,16 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Light map screen for visualizing and managing detected light signals.
+ *
+ * Provides a radar-like interface for detecting and tracking devices using
+ * light signals. Includes camera-based scanning, device visualization,
+ * heartbeat transmission, and signal statistics display.
+ *
+ * @param flashlightController Controller for flashlight-based signaling
+ * @param modifier Modifier for customizing the layout
+ */
 @Composable
 fun LightMapScreen(
     flashlightController: FlashlightController,

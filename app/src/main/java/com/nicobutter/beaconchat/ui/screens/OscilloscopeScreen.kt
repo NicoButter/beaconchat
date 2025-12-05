@@ -28,6 +28,15 @@ import androidx.lifecycle.LifecycleOwner
 import com.nicobutter.beaconchat.lightmap.OpticalOscilloscope
 import java.util.concurrent.Executors
 
+/**
+ * Optical oscilloscope screen for real-time light signal analysis.
+ *
+ * Provides a visual interface for monitoring light intensity changes and
+ * decoding Morse code signals. Displays waveform visualization, signal
+ * statistics, and decoded messages in real-time using camera input.
+ *
+ * @param modifier Modifier for customizing the layout
+ */
 @Composable
 fun OscilloscopeScreen(
     modifier: Modifier = Modifier

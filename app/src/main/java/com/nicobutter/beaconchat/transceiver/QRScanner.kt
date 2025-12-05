@@ -11,6 +11,13 @@ import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import java.nio.ByteBuffer
 
+/**
+ * Scans QR codes from camera frames using CameraX and ZXing.
+ *
+ * This analyzer processes camera image frames to detect and decode QR codes
+ * in real-time. It implements debouncing to prevent duplicate detections and
+ * handles image processing efficiently with proper resource cleanup.
+ */
 class QRScanner(private val onQRCodeDetected: (String) -> Unit) : ImageAnalysis.Analyzer {
 
     private val reader =
@@ -26,6 +33,15 @@ class QRScanner(private val onQRCodeDetected: (String) -> Unit) : ImageAnalysis.
     private var lastScanTime = 0L
     private val SCAN_DELAY_MS = 1000L // Avoid spamming the same code
 
+    /**
+     * Analyzes a camera image frame for QR codes.
+     *
+     * Processes the ImageProxy to extract YUV data, converts it to a format
+     * suitable for ZXing, and attempts to decode any QR codes present.
+     * Implements debouncing to prevent repeated callbacks for the same code.
+     *
+     * @param image The camera image frame to analyze
+     */
     override fun analyze(image: ImageProxy) {
         try {
             val buffer = image.planes[0].buffer
@@ -70,6 +86,15 @@ class QRScanner(private val onQRCodeDetected: (String) -> Unit) : ImageAnalysis.
         }
     }
 
+    /**
+     * Converts a ByteBuffer to a byte array for image processing.
+     *
+     * Extracts all remaining bytes from the buffer into a new array,
+     * rewinding the buffer position to the beginning first.
+     *
+     * @param buffer The ByteBuffer to convert
+     * @return Byte array containing the buffer's data
+     */
     private fun toByteArray(buffer: ByteBuffer): ByteArray {
         buffer.rewind()
         val data = ByteArray(buffer.remaining())

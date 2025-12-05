@@ -36,18 +36,38 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * Transmission methods available for sending messages.
+ */
 enum class TransmissionMethod {
     FLASHLIGHT,
     VIBRATION,
     SOUND
 }
 
+/**
+ * Encoding types supported for message transmission.
+ */
 enum class EncodingType {
     MORSE,
     ASCII_BINARY
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Transmitter screen for sending messages using various transmission methods.
+ *
+ * Provides a comprehensive interface for composing and sending messages through
+ * flashlight, vibration, or sound using Morse code or ASCII binary encoding.
+ * Includes quick action buttons for common messages and continuous transmission
+ * capabilities.
+ *
+ * @param flashlightController Controller for flashlight-based transmission
+ * @param vibrationController Controller for vibration-based transmission
+ * @param soundController Controller for ultrasound-based transmission
+ * @param morseEncoder Encoder for converting text to Morse code timing sequences
+ * @param userPreferences User preferences for customization
+ * @param modifier Modifier for customizing the layout
+ */
 @Composable
 fun TransmitterScreen(
     flashlightController: FlashlightController,

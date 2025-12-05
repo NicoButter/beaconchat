@@ -9,6 +9,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+/**
+ * Controls flashlight transmission for BeaconChat signaling.
+ *
+ * This controller manages the device camera flashlight (torch) to transmit
+ * timing-based signals. It converts timing sequences into flashlight on/off
+ * patterns suitable for optical communication.
+ */
 class FlashlightController(context: Context) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private var cameraId: String? = null
@@ -16,7 +23,7 @@ class FlashlightController(context: Context) {
     private var isFlashlightOn = false
     @Volatile private var isStopped = false
 
-    // Callback para debugging visual
+    /** Callback for visual debugging of transmission state. */
     var onStateChange: ((Boolean, Int, Int) -> Unit)? = null
 
     init {
@@ -35,6 +42,14 @@ class FlashlightController(context: Context) {
         }
     }
 
+    /**
+     * Transmits a sequence of timing durations using the flashlight.
+     *
+     * Converts the timing list into flashlight on/off states where even indices
+     * represent ON periods and odd indices represent OFF periods.
+     *
+     * @param timings List of durations in milliseconds, alternating ON/OFF periods
+     */
     suspend fun transmit(timings: List<Long>) {
         val id =
                 cameraId
@@ -111,6 +126,14 @@ class FlashlightController(context: Context) {
         }
     }
 
+    /**
+     * Ensures the flashlight is turned off and waits for hardware to respond.
+     *
+     * This method provides a reliable way to turn off the flashlight with
+     * error handling and a small delay to ensure the hardware state is stable.
+     *
+     * @param id The camera ID to control
+     */
     private fun ensureFlashlightOff(id: String) {
         try {
             if (isFlashlightOn) {
@@ -126,12 +149,25 @@ class FlashlightController(context: Context) {
         }
     }
 
+    /**
+     * Stops any ongoing transmission and immediately turns off the flashlight.
+     *
+     * This method sets the stop flag to interrupt the transmission loop and
+     * immediately turns off the flashlight for safety.
+     */
     fun stop() {
         isStopped = true
         // Immediately turn off flashlight
         cameraId?.let { ensureFlashlightOff(it) }
     }
 
+    /**
+     * Cleans up resources and ensures the flashlight is turned off.
+     *
+     * This method should be called when the controller is no longer needed
+     * to ensure proper resource cleanup and prevent the flashlight from
+     * remaining on.
+     */
     fun cleanup() {
         cameraId?.let { id ->
             try {

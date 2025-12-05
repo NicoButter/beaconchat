@@ -4,6 +4,14 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import java.nio.ByteBuffer
 
+/**
+ * Detects light state changes from camera frames for optical signaling.
+ *
+ * This analyzer processes camera image frames to detect changes in brightness
+ * levels, particularly useful for detecting flashlight signals. It uses dynamic
+ * thresholding based on recent brightness history to adapt to changing lighting
+ * conditions and samples the center region of the image for reliable detection.
+ */
 class LightDetector(private val onLightStateChanged: (Boolean) -> Unit) : ImageAnalysis.Analyzer {
 
     private var lastState = false
@@ -12,6 +20,15 @@ class LightDetector(private val onLightStateChanged: (Boolean) -> Unit) : ImageA
     // Reduce history size so threshold adapts faster to changing light conditions
     private val historySize = 8
 
+    /**
+     * Analyzes a camera image frame for brightness changes.
+     *
+     * Samples the center region of the YUV luminance plane to calculate average
+     * brightness. Uses dynamic thresholding based on recent brightness history
+     * to detect significant light state changes while filtering out noise.
+     *
+     * @param image The camera image frame to analyze
+     */
     override fun analyze(image: ImageProxy) {
         val buffer = image.planes[0].buffer
     val data = toByteArray(buffer)
@@ -76,6 +93,15 @@ class LightDetector(private val onLightStateChanged: (Boolean) -> Unit) : ImageA
         image.close()
     }
 
+    /**
+     * Converts a ByteBuffer to a byte array for image processing.
+     *
+     * Extracts all remaining bytes from the buffer into a new array,
+     * rewinding the buffer position to the beginning first.
+     *
+     * @param buffer The ByteBuffer to convert
+     * @return Byte array containing the buffer's data
+     */
     private fun toByteArray(buffer: ByteBuffer): ByteArray {
         buffer.rewind()
         val data = ByteArray(buffer.remaining())

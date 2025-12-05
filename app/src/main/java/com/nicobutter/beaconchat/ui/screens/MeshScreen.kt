@@ -40,6 +40,17 @@ import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Mesh networking screen for Bluetooth LE-based peer-to-peer communication.
+ *
+ * Provides interface for discovering peers, sending messages, and managing
+ * mesh network connections. Displays connected peers, message history,
+ * and handles Bluetooth permissions and state management.
+ *
+ * @param meshController Bluetooth LE mesh controller for network operations
+ * @param userPreferences User preferences for callsign and settings
+ * @param modifier Modifier for customizing the layout
+ */
 @Composable
 fun MeshScreen(
         meshController: BLEMeshController,

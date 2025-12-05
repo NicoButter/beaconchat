@@ -6,7 +6,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// Set of Material typography styles to start with
+/**
+ * Material Design 3 typography definitions for BeaconChat.
+ *
+ * Defines text styles following Material Design typography guidelines.
+ * Currently uses system default fonts with custom sizing and spacing
+ * optimized for the BeaconChat user interface.
+ */
+
+// BeaconChat typography configuration
 val Typography = Typography(
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,

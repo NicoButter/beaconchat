@@ -16,6 +16,16 @@ import com.nicobutter.beaconchat.data.UserPreferences
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Settings screen for configuring BeaconChat preferences.
+ *
+ * Provides user interface for managing application settings including callsign
+ * configuration, validation, and persistence. Uses DataStore for reactive
+ * state management and provides feedback for user actions.
+ *
+ * @param userPreferences User preferences data store for configuration management
+ * @param modifier Modifier for customizing the layout
+ */
 @Composable
 fun SettingsScreen(userPreferences: UserPreferences, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()

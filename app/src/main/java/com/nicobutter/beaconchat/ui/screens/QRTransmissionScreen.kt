@@ -16,6 +16,19 @@ import androidx.compose.ui.unit.dp
 import com.nicobutter.beaconchat.transceiver.FlashlightController
 import kotlinx.coroutines.delay
 
+/**
+ * QR code transmission screen for displaying scannable QR codes.
+ *
+ * Shows a QR code bitmap with automatic dismissal after a timeout period.
+ * Includes attention-grabbing flashlight flashes and countdown display
+ * to guide the scanning process.
+ *
+ * @param qrBitmap The QR code bitmap to display
+ * @param message The original message encoded in the QR code
+ * @param flashlightController Controller for attention-grabbing flashes
+ * @param onDismiss Callback invoked when the screen should be dismissed
+ * @param modifier Modifier for customizing the layout
+ */
 @Composable
 fun QRTransmissionScreen(
         qrBitmap: Bitmap,

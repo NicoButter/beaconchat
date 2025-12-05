@@ -8,6 +8,13 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 
+/**
+ * Generates QR codes for BeaconChat data transmission.
+ *
+ * This utility class creates QR code bitmaps from text data using the ZXing
+ * library. It supports configurable size and error correction levels for
+ * optimal scanning reliability in various conditions.
+ */
 class QRGenerator {
 
     companion object {
@@ -16,11 +23,15 @@ class QRGenerator {
     }
 
     /**
-     * Generate a QR code bitmap from text
-     * @param text The text to encode
-     * @param size The size of the QR code (width and height)
-     * @param errorCorrectionLevel Error correction level (default: HIGH for better detection)
-     * @return Bitmap of the QR code
+     * Generates a QR code bitmap from the provided text.
+     *
+     * Creates a QR code bitmap with specified dimensions and error correction level.
+     * Uses UTF-8 encoding and minimal margins for maximum data density.
+     *
+     * @param text The text content to encode in the QR code
+     * @param size The width and height of the generated bitmap in pixels (default: 512)
+     * @param errorCorrectionLevel Error correction level for robustness (default: High)
+     * @return Bitmap containing the QR code, or null if generation fails
      */
     fun generateQRCode(
             text: String,
@@ -57,7 +68,16 @@ class QRGenerator {
         }
     }
 
-    /** Generate QR code with optimal size based on text length */
+    /**
+     * Generates a QR code with optimal size based on text length.
+     *
+     * Automatically selects an appropriate bitmap size based on the input text
+     * length to balance readability and data capacity. Larger texts get larger
+     * QR codes for better scanning reliability.
+     *
+     * @param text The text content to encode in the QR code
+     * @return Bitmap containing the optimally sized QR code, or null if generation fails
+     */
     fun generateOptimalQRCode(text: String): Bitmap? {
         val optimalSize =
                 when {
@@ -71,7 +91,17 @@ class QRGenerator {
         return generateQRCode(text, optimalSize)
     }
 
-    /** Estimate if text can be encoded in QR with given error correction */
+    /**
+     * Checks if the given text can be encoded in a QR code with the specified error correction.
+     *
+     * Estimates encoding capacity based on QR code specifications for Version 40
+     * (maximum size) with the given error correction level. Considers UTF-8 byte
+     * length for accurate capacity calculation.
+     *
+     * @param text The text to check for QR encoding capability
+     * @param errorCorrectionLevel Error correction level to check capacity for (default: High)
+     * @return True if the text can be encoded, false if it exceeds capacity
+     */
     fun canEncode(
             text: String,
             errorCorrectionLevel: ErrorCorrectionLevel = ErrorCorrectionLevel.H

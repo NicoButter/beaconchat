@@ -33,6 +33,16 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Receiver screen for detecting and decoding incoming messages.
+ *
+ * Provides camera-based detection for both light signals (Morse code) and QR codes.
+ * Handles camera permissions, switches between detection modes, and displays
+ * decoded messages in real-time.
+ *
+ * @param modifier Modifier for customizing the layout
+ * @param lifecycleOwner Lifecycle owner for camera management
+ */
 @Composable
 fun ReceiverScreen(
         modifier: Modifier = Modifier,

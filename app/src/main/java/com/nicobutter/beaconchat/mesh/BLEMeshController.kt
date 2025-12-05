@@ -13,6 +13,29 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * Manages Bluetooth LE mesh networking for BeaconChat device communication.
+ *
+ * This controller handles all Bluetooth LE operations for the BeaconChat mesh network,
+ * including device discovery, advertising, GATT server/client operations, and message
+ * exchange. It provides a reactive interface using Kotlin Flows for UI integration.
+ *
+ * Key features:
+ * - BLE advertising with custom service UUIDs and callsign data
+ * - Device scanning with service filtering
+ * - GATT server for receiving messages
+ * - GATT client for sending messages to peers
+ * - Reactive state management with error handling
+ *
+ * @property context Android context for Bluetooth operations
+ * @property peers Flow of discovered peer devices
+ * @property messages Flow of chat messages (sent and received)
+ * @property isAdvertising Flow indicating if device is currently advertising
+ * @property isScanning Flow indicating if device is currently scanning
+ * @property bluetoothEnabled Flow indicating Bluetooth adapter state
+ * @property isSending Flow indicating if a message is currently being sent
+ * @property lastError Flow containing the last error message (null if no error)
+ */
 class BLEMeshController(private val context: Context) {
 
     private val bluetoothManager: BluetoothManager =
@@ -46,13 +69,16 @@ class BLEMeshController(private val context: Context) {
 
     private val _bluetoothEnabled = MutableStateFlow(bluetoothAdapter?.isEnabled == true)
     val bluetoothEnabled: StateFlow<Boolean> = _bluetoothEnabled.asStateFlow()
-    
+
     private val _isSending = MutableStateFlow(false)
     val isSending: StateFlow<Boolean> = _isSending.asStateFlow()
-    
+
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
-    
+
+    /**
+     * Clears the last error message.
+     */
     fun clearError() {
         _lastError.value = null
     }
@@ -167,7 +193,16 @@ class BLEMeshController(private val context: Context) {
         }
     }
 
-    /** Send a message to a peer */
+    /**
+     * Send a message to a peer device.
+     *
+     * Establishes a GATT connection to the specified peer and writes the message
+     * to the chat characteristic. The message format is "CALLSIGN:MESSAGE".
+     *
+     * @param peerAddress Bluetooth MAC address of the target device
+     * @param message Text content to send
+     * @param myCallsign Callsign of the sender (current user)
+     */
     fun sendMessage(peerAddress: String, message: String, myCallsign: String) {
         if (!checkBluetoothPermissions()) {
             Log.e(TAG, "Missing Bluetooth permissions for sendMessage")
@@ -295,6 +330,12 @@ class BLEMeshController(private val context: Context) {
         }
     }
 
+    /**
+     * Starts the GATT server for receiving messages from other devices.
+     *
+     * Creates a GATT service with a writable characteristic for chat messages.
+     * This server runs while the device is advertising.
+     */
     private fun startGattServer() {
         if (!checkBluetoothPermissions()) return
 
@@ -324,6 +365,9 @@ class BLEMeshController(private val context: Context) {
         }
     }
 
+    /**
+     * Stops the GATT server and cleans up resources.
+     */
     private fun stopGattServer() {
         if (!checkBluetoothPermissions()) return
         try {
@@ -446,6 +490,14 @@ class BLEMeshController(private val context: Context) {
                 }
             }
 
+    /**
+     * Processes a BLE scan result and updates the peers list.
+     *
+     * Extracts device information, callsign from service data, and RSSI.
+     * Updates existing peers or adds new ones to the peers flow.
+     *
+     * @param result The scan result containing device information
+     */
     private fun processScanResult(result: ScanResult) {
         try {
             val device = result.device
@@ -489,6 +541,15 @@ class BLEMeshController(private val context: Context) {
         }
     }
 
+    /**
+     * Checks if all required Bluetooth permissions are granted.
+     *
+     * Handles different permission requirements for Android versions:
+     * - Android 12+ (API 31+): BLUETOOTH_SCAN, BLUETOOTH_ADVERTISE, BLUETOOTH_CONNECT
+     * - Older versions: BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_FINE_LOCATION
+     *
+     * @return true if all required permissions are granted, false otherwise
+     */
     private fun checkBluetoothPermissions(): Boolean {
         val permissions =
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
@@ -510,6 +571,12 @@ class BLEMeshController(private val context: Context) {
         }
     }
 
+    /**
+     * Updates the Bluetooth enabled state flow based on current adapter state.
+     *
+     * Should be called when the Bluetooth adapter state changes to keep
+     * the UI synchronized with the actual Bluetooth state.
+     */
     fun updateBluetoothState() {
         _bluetoothEnabled.value = bluetoothAdapter?.isEnabled == true
     }

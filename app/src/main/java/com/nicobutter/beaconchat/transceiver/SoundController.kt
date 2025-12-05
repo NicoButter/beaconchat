@@ -11,11 +11,19 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+/**
+ * Controls ultrasound transmission for BeaconChat signaling.
+ *
+ * This controller generates ultrasonic audio signals (18.5kHz) to transmit
+ * timing-based signals. It converts timing sequences into audio on/off
+ * patterns suitable for acoustic communication, using frequencies that
+ * are nearly inaudible to humans.
+ */
 class SoundController {
     private val transmissionMutex = Mutex()
     private var audioTrack: AudioTrack? = null
 
-    // Callback para debugging visual
+    /** Callback for visual debugging of transmission state. */
     var onStateChange: ((Boolean, Int, Int) -> Unit)? = null
 
     // Configuración de audio para ultrasonido
@@ -29,6 +37,15 @@ class SoundController {
         )
     }
 
+    /**
+     * Transmits a sequence of timing durations using ultrasound signals.
+     *
+     * Converts the timing list into audio on/off states where even indices
+     * represent ultrasound tone periods and odd indices represent silence periods.
+     * Uses 18.5kHz ultrasonic frequency for nearly inaudible transmission.
+     *
+     * @param timings List of durations in milliseconds, alternating tone/silence periods
+     */
     suspend fun transmit(timings: List<Long>) {
         // Prevent concurrent transmissions
         transmissionMutex.withLock {
@@ -64,6 +81,15 @@ class SoundController {
         }
     }
 
+    /**
+     * Generates and plays an ultrasonic tone for the specified duration.
+     *
+     * Creates a sine wave at 18.5kHz frequency, configures an AudioTrack
+     * with appropriate attributes for ultrasound transmission, and plays
+     * the tone for the specified duration.
+     *
+     * @param durationMs Duration to play the tone in milliseconds
+     */
     private suspend fun playTone(durationMs: Long) {
         try {
             val numSamples = (durationMs * sampleRate / 1000).toInt()
@@ -122,6 +148,12 @@ class SoundController {
         }
     }
 
+    /**
+     * Stops any currently playing audio and releases the AudioTrack resources.
+     *
+     * Safely stops playback if active and releases the audio track to free
+     * system resources. Handles exceptions gracefully to prevent crashes.
+     */
     private fun stopAudio() {
         try {
             audioTrack?.let { track ->
@@ -136,6 +168,13 @@ class SoundController {
         }
     }
 
+    /**
+     * Cleans up audio resources and ensures no audio is playing.
+     *
+     * This method should be called when the controller is no longer needed
+     * to ensure proper resource cleanup and prevent audio from continuing
+     * to play.
+     */
     fun cleanup() {
         try {
             stopAudio()

@@ -13,7 +13,17 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.nicobutter.beaconchat.R
 
-
+/**
+ * Welcome screen for BeaconChat application.
+ *
+ * The main landing screen that displays the app logo, branding, and provides
+ * navigation options to transmit or receive messages. This screen serves as
+ * the entry point for users to choose their communication mode.
+ *
+ * @param onNavigateToTransmit Callback invoked when user taps transmit button
+ * @param onNavigateToReceive Callback invoked when user taps receive button
+ * @param modifier Modifier for customizing the layout
+ */
 @Composable
 fun WelcomeScreen(
         onNavigateToTransmit: () -> Unit,

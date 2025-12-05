@@ -9,31 +9,40 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.nio.ByteBuffer
 
 /**
- * OpticalOscilloscope - Convierte la cámara en un osciloscopio óptico
- * 
- * Lee intensidad de luz en tiempo real y genera una curva de señal
- * que puede decodificar Morse, Binary, y otros patrones con precisión quirúrgica.
+ * Converts the camera into an optical oscilloscope for real-time signal analysis.
+ *
+ * This analyzer reads light intensity in real-time and generates a signal curve
+ * that can decode Morse code, binary patterns, and other signals with surgical precision.
+ * It focuses on the center region of the camera frame for optimal signal detection.
  */
 class OpticalOscilloscope : ImageAnalysis.Analyzer {
     
-    // Buffer circular de intensidades (últimos N frames)
+    // Circular buffer of intensities (last N frames)
     private val intensityBuffer = ArrayDeque<IntensityPoint>(BUFFER_SIZE)
     
-    // StateFlow para la UI
+    // StateFlow for the UI
     private val _signalData = MutableStateFlow<List<IntensityPoint>>(emptyList())
     val signalData: StateFlow<List<IntensityPoint>> = _signalData.asStateFlow()
     
-    // Detección de mensajes decodificados
+    // Detection of decoded messages
     private val _decodedMessage = MutableStateFlow<String>("")
     val decodedMessage: StateFlow<String> = _decodedMessage.asStateFlow()
     
-    // Estadísticas de señal
+    // Signal statistics
     private val _signalStats = MutableStateFlow(SignalStats())
     val signalStats: StateFlow<SignalStats> = _signalStats.asStateFlow()
     
-    // Detector de pulsos (para Morse)
+    // Pulse detector (for Morse code)
     private val pulseDetector = PulseDetector()
     
+    /**
+     * Represents a single intensity measurement point for oscilloscope display.
+     *
+     * @property timestamp When this measurement was taken
+     * @property intensity Light intensity value (0-255)
+     * @property isPeak Whether this point represents a local maximum
+     * @property isValley Whether this point represents a local minimum
+     */
     data class IntensityPoint(
         val timestamp: Long,
         val intensity: Int, // 0-255
@@ -41,6 +50,15 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
         val isValley: Boolean = false
     )
     
+    /**
+     * Real-time signal statistics for monitoring and debugging.
+     *
+     * @property fps Current frames per second processing rate
+     * @property avgIntensity Average intensity across recent frames
+     * @property minIntensity Minimum intensity in recent frames
+     * @property maxIntensity Maximum intensity in recent frames
+     * @property noiseLevel Signal noise level (standard deviation)
+     */
     data class SignalStats(
         val fps: Int = 0,
         val avgIntensity: Int = 0,
@@ -53,36 +71,45 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
     private var frameCount = 0
     private var lastFpsUpdate = 0L
     
+    /**
+     * Processes a camera frame to analyze light intensity and decode signals.
+     *
+     * Extracts intensity from the center region of the frame, updates the signal buffer,
+     * detects peaks/valleys for visualization, attempts Morse code decoding, and
+     * calculates real-time statistics.
+     *
+     * @param image The camera image proxy containing the frame data
+     */
     override fun analyze(image: ImageProxy) {
         try {
             val currentTime = System.currentTimeMillis()
             
-            // Extraer intensidad promedio del frame (ROI centrado como LightDetector)
+            // Extract average intensity from frame (centered ROI like LightDetector)
             val buffer = image.planes[0].buffer
             val data = toByteArray(buffer)
             val intensity = calculateCenterIntensity(image, data)
             
-            // Crear punto de intensidad
+            // Create intensity point
             val point = IntensityPoint(
                 timestamp = currentTime,
                 intensity = intensity
             )
             
-            // Agregar al buffer circular
+            // Add to circular buffer
             intensityBuffer.addLast(point)
             if (intensityBuffer.size > BUFFER_SIZE) {
                 intensityBuffer.removeFirst()
             }
             
-            // Detectar picos y valles (para visualización y análisis)
+            // Detect peaks and valleys (for visualization and analysis)
             if (intensityBuffer.size >= 5) {
                 markPeaksAndValleys()
             }
             
-            // Actualizar StateFlow para la UI
+            // Update StateFlow for the UI
             _signalData.value = intensityBuffer.toList()
             
-            // Detector de pulsos Morse
+            // Morse pulse detector
             if (intensityBuffer.size >= 10) {
                 val detectedPulses = pulseDetector.detectPulses(intensityBuffer.toList())
                 if (detectedPulses.isNotEmpty()) {
@@ -94,7 +121,7 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
                 }
             }
             
-            // Calcular estadísticas
+            // Calculate statistics
             updateStats(currentTime)
             
             lastFrameTime = currentTime
@@ -201,6 +228,12 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
         return data
     }
     
+    /**
+     * Resets all analysis state and clears buffers.
+     *
+     * Clears the intensity buffer, decoded messages, statistics, and resets
+     * the pulse detector. Useful when restarting analysis or switching modes.
+     */
     fun reset() {
         intensityBuffer.clear()
         _signalData.value = emptyList()
@@ -213,18 +246,30 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
     
     companion object {
         private const val TAG = "OpticalOscilloscope"
-        private const val BUFFER_SIZE = 300 // ~10 segundos a 30 FPS
+        private const val BUFFER_SIZE = 300 // ~10 seconds at 30 FPS
     }
 }
 
 /**
- * PulseDetector - Detecta pulsos Morse en la curva de señal
+ * Detects and decodes Morse code pulses from light intensity signals.
+ *
+ * This class analyzes intensity curves to identify dots, dashes, and gaps
+ * that form Morse code patterns. It uses dynamic thresholding based on
+ * recent signal history for robust detection in varying lighting conditions.
  */
 class PulseDetector {
     private val pulseHistory = mutableListOf<Pulse>()
     private val intensityHistory = ArrayDeque<Int>()
-    private val historySize = 30 // Últimos 30 frames para calcular umbral
+    private val historySize = 30 // Last 30 frames for calculating threshold
     
+    /**
+     * Represents a detected pulse in the signal.
+     *
+     * @property startTime When the pulse began
+     * @property endTime When the pulse ended
+     * @property duration Total duration of the pulse in milliseconds
+     * @property type The type of pulse (DOT, DASH, or GAP)
+     */
     data class Pulse(
         val startTime: Long,
         val endTime: Long,
@@ -232,16 +277,29 @@ class PulseDetector {
         val type: PulseType
     )
     
+    /**
+     * Enumeration of different pulse types in Morse code.
+     */
     enum class PulseType {
-        DOT,    // Pulso corto
-        DASH,   // Pulso largo
-        GAP     // Silencio entre pulsos
+        DOT,    // Short pulse
+        DASH,   // Long pulse
+        GAP     // Silence between pulses
     }
     
+    /**
+     * Analyzes a signal curve to detect Morse code pulses.
+     *
+     * Uses dynamic thresholding based on recent intensity history to identify
+     * transitions between light and dark states. Filters out noise by ignoring
+     * very short pulses.
+     *
+     * @param signal List of intensity points representing the signal curve
+     * @return List of detected pulses with timing and type information
+     */
     fun detectPulses(signal: List<OpticalOscilloscope.IntensityPoint>): List<Pulse> {
         val pulses = mutableListOf<Pulse>()
         
-        // Actualizar historial de intensidades para umbral dinámico
+        // Update intensity history for dynamic threshold
         signal.forEach { point ->
             intensityHistory.addLast(point.intensity)
             if (intensityHistory.size > historySize) {
@@ -249,12 +307,12 @@ class PulseDetector {
             }
         }
         
-        // Calcular umbral dinámico basado en min/max como LightDetector
+        // Calculate dynamic threshold based on min/max like LightDetector
         val min = intensityHistory.minOrNull() ?: 0
         val max = intensityHistory.maxOrNull() ?: 255
         
-        // Si hay suficiente rango dinámico, usar umbral en el medio
-        // Si no, usar un umbral basado en promedio
+        // If there's enough dynamic range, use threshold in the middle
+        // If not, use a threshold based on average
         val threshold = if (max - min > 20) {
             (max + min) / 2
         } else {
@@ -267,15 +325,15 @@ class PulseDetector {
         
         for (point in signal) {
             if (!inPulse && point.intensity > threshold) {
-                // Inicio de pulso (ON)
+                // Start of pulse (ON)
                 inPulse = true
                 pulseStart = point.timestamp
             } else if (inPulse && point.intensity < threshold) {
-                // Fin de pulso (OFF)
+                // End of pulse (OFF)
                 inPulse = false
                 val duration = point.timestamp - pulseStart
                 
-                if (duration > 30) { // Ignorar pulsos muy cortos (ruido)
+                if (duration > 30) { // Ignore very short pulses (noise)
                     val type = if (duration < 150) PulseType.DOT else PulseType.DASH
                     pulses.add(Pulse(pulseStart, point.timestamp, duration, type))
                 }
@@ -285,6 +343,15 @@ class PulseDetector {
         return pulses
     }
     
+    /**
+     * Decodes a list of pulses into readable text using Morse code.
+     *
+     * Converts the pulse sequence into Morse code symbols and then
+     * translates them into letters and words.
+     *
+     * @param pulses List of detected pulses to decode
+     * @return Decoded text message
+     */
     fun decodeMorse(pulses: List<Pulse>): String {
         if (pulses.isEmpty()) return ""
         
@@ -317,6 +384,11 @@ class PulseDetector {
             .joinToString("")
     }
     
+    /**
+     * Resets the pulse detector state.
+     *
+     * Clears all pulse history and intensity history buffers.
+     */
     fun reset() {
         pulseHistory.clear()
         intensityHistory.clear()
