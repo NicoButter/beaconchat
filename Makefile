@@ -1,4 +1,4 @@
-.PHONY: help deploy quick build devices logs clean uninstall watch
+.PHONY: help deploy quick clean-deploy build devices logs clean uninstall watch
 
 # Configuración de Java
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
@@ -15,6 +15,9 @@ deploy: ## Compila, instala y ejecuta en celular
 
 quick: ## Reinstala APK sin compilar
 	@./quick-deploy.sh
+
+clean-deploy: ## Elimina app anterior y hace instalación limpia
+	@./clean-deploy.sh
 
 build: ## Solo compila el APK
 	@./gradlew assembleDebug

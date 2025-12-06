@@ -1,6 +1,7 @@
 package com.nicobutter.beaconchat.ui.screens
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -11,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -31,6 +34,7 @@ import com.nicobutter.beaconchat.R
  * @param onEmergencyHelp Callback invoked when user taps emergency HELP button
  * @param modifier Modifier for customizing the layout
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WelcomeScreen(
         onNavigateToTransmit: () -> Unit,
@@ -39,136 +43,123 @@ fun WelcomeScreen(
         onEmergencyHelp: () -> Unit = {},
         modifier: Modifier = Modifier
 ) {
-        Column(
-                modifier = modifier.fillMaxSize().padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-        ) {
-                // Logo de BeaconChat
-                Image(
-                        painter = painterResource(id = R.drawable.logo),
-                        contentDescription = "BeaconChat Logo",
-                        modifier = Modifier.size(120.dp)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                        text = "BeaconChat",
-                        style = MaterialTheme.typography.headlineLarge,
-                        color = MaterialTheme.colorScheme.primary
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                        text = "Comunicación por Luz",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onBackground
-                )
-
-                Spacer(modifier = Modifier.height(48.dp))
-
-                // Emergency buttons section
-                Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                        ),
-                        shape = RoundedCornerShape(16.dp)
-                ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                                Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(bottom = 12.dp)
-                                ) {
-                                        Icon(
-                                                Icons.Default.Warning,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.error
+        Box(
+                modifier = modifier
+                        .fillMaxSize()
+                        .background(
+                                brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                                Color.Black,
+                                                Color(0xFF1A1A1A),
+                                                Color(0xFF2D2D2D),
+                                                Color(0xFF404040)
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                                "EMERGENCIAS",
-                                                style = MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.error
-                                        )
-                                }
-
-                                // Emergency SOS Button
-                                Button(
-                                        onClick = onEmergencySOS,
-                                        modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(56.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFFD32F2F),
-                                                contentColor = Color.White
-                                        ),
-                                        shape = RoundedCornerShape(12.dp)
-                                ) {
-                                        Text(
-                                                "🆘 SOS - EMERGENCIA",
-                                                fontSize = 18.sp,
-                                                fontWeight = FontWeight.Bold
-                                        )
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                // Emergency HELP Button
-                                Button(
-                                        onClick = onEmergencyHelp,
-                                        modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(56.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFFFF6F00),
-                                                contentColor = Color.White
-                                        ),
-                                        shape = RoundedCornerShape(12.dp)
-                                ) {
-                                        Text(
-                                                "⚠️ AUXILIO",
-                                                fontSize = 18.sp,
-                                                fontWeight = FontWeight.Bold
-                                        )
-                                }
-
-                                Text(
-                                        "Transmite señal continua para drones y rescate",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                        modifier = Modifier.padding(top = 8.dp)
                                 )
-                        }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Botón Transmitir
-                Button(
-                        onClick = onNavigateToTransmit,
-                        modifier = Modifier.fillMaxWidth().height(64.dp)
-                ) {
-                        Text("Transmitir Mensaje", style = MaterialTheme.typography.titleMedium)
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Botón Recibir
-                OutlinedButton(
-                        onClick = onNavigateToReceive,
-                        modifier = Modifier.fillMaxWidth().height(64.dp)
-                ) {
-                        Icon(
-                                imageVector = Icons.Default.Email,
-                                contentDescription = "Recibir",
-                                modifier = Modifier.size(24.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Recibir Mensaje", style = MaterialTheme.typography.titleMedium)
+        ) {
+                Column(
+                        modifier = Modifier
+                                .fillMaxSize()
+                                .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                ) {
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        // Logo grande
+                        Image(
+                                painter = painterResource(id = R.drawable.logo),
+                                contentDescription = "BeaconChat Logo",
+                                modifier = Modifier.size(252.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        // Nombre de la app
+                        Text(
+                                text = "BeaconChat",
+                                fontSize = 42.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                                text = "Comunicación por Luz",
+                                fontSize = 16.sp,
+                                color = Color.White.copy(alpha = 0.7f)
+                        )
+
+                        Spacer(modifier = Modifier.weight(1.5f))
+
+                        // Botones principales
+                        Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                                // Botón Transmitir
+                                Card(
+                                        onClick = onNavigateToTransmit,
+                                        modifier = Modifier
+                                                .weight(1f)
+                                                .aspectRatio(1f),
+                                        colors = CardDefaults.cardColors(
+                                                containerColor = Color(0xFF6200EE)
+                                        ),
+                                        shape = RoundedCornerShape(24.dp)
+                                ) {
+                                        Column(
+                                                modifier = Modifier.fillMaxSize(),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center
+                                        ) {
+                                                Text(
+                                                        text = "🔦",
+                                                        fontSize = 64.sp
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text(
+                                                        text = "TRANSMITIR",
+                                                        fontSize = 18.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                )
+                                        }
+                                }
+
+                                // Botón Detectar
+                                Card(
+                                        onClick = onNavigateToReceive,
+                                        modifier = Modifier
+                                                .weight(1f)
+                                                .aspectRatio(1f),
+                                        colors = CardDefaults.cardColors(
+                                                containerColor = Color(0xFF03DAC6)
+                                        ),
+                                        shape = RoundedCornerShape(24.dp)
+                                ) {
+                                        Column(
+                                                modifier = Modifier.fillMaxSize(),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center
+                                        ) {
+                                                Text(
+                                                        text = "📡",
+                                                        fontSize = 64.sp
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text(
+                                                        text = "DETECTAR",
+                                                        fontSize = 18.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                )
+                                        }
+                                }
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
                 }
         }
 }

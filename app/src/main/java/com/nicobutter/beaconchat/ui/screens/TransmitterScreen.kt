@@ -235,10 +235,40 @@ fun TransmitterScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Encoding selection
+        // Encoding selection con alfabeto detectado y bandera
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = selectedEncoding == EncodingType.MORSE, onClick = { selectedEncoding = EncodingType.MORSE }, label = { Text("Código Morse") }, leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) }, modifier = Modifier.weight(1f))
-            FilterChip(selected = selectedEncoding == EncodingType.ASCII_BINARY, onClick = { selectedEncoding = EncodingType.ASCII_BINARY }, label = { Text("ASCII Binario") }, leadingIcon = { Icon(Icons.Default.Warning, contentDescription = null) }, modifier = Modifier.weight(1f))
+            FilterChip(
+                selected = selectedEncoding == EncodingType.MORSE, 
+                onClick = { selectedEncoding = EncodingType.MORSE }, 
+                label = { 
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("Código Morse")
+                            Text(
+                                morseEncoder.getFlag(),
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+                        Text(
+                            morseEncoder.getAlphabetName(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }, 
+                leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) }, 
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = selectedEncoding == EncodingType.ASCII_BINARY, 
+                onClick = { selectedEncoding = EncodingType.ASCII_BINARY }, 
+                label = { Text("ASCII Binario") }, 
+                leadingIcon = { Icon(Icons.Default.Warning, contentDescription = null) }, 
+                modifier = Modifier.weight(1f)
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))

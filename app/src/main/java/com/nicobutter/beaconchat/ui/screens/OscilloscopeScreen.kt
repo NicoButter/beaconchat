@@ -52,7 +52,10 @@ fun OscilloscopeScreen(
     val decodedMessage by oscilloscope.decodedMessage.collectAsState()
     val stats by oscilloscope.signalStats.collectAsState()
     
-    var isScanning by remember { mutableStateOf(false) }
+    // Iniciar escaneo automáticamente al entrar
+    LaunchedEffect(Unit) {
+        // El escaneo se inicia automáticamente cuando se crea la cámara
+    }
     
     Column(
         modifier = modifier
@@ -75,26 +78,42 @@ fun OscilloscopeScreen(
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    "${stats.fps} FPS | Noise: ${stats.noiseLevel}",
+                    "${stats.fps} FPS | Range: ${stats.minIntensity}-${stats.maxIntensity}",
                     color = Color.Green.copy(alpha = 0.7f),
                     fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace
                 )
+                Text(
+                    "Protocolo: DOT<200ms DASH:200-500ms",
+                    color = Color.Cyan.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    "Filtro: Suavizado 0.7x",
+                    color = Color.Yellow.copy(alpha = 0.6f),
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace
+                )
             }
             
-            // Botón Start/Stop
-            Button(
-                onClick = {
-                    isScanning = !isScanning
-                    if (!isScanning) {
-                        oscilloscope.reset()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isScanning) Color.Red else Color.Green
-                )
+            // Indicador de escaneo activo
+            Row(
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(if (isScanning) "STOP" else "START")
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(Color.Green, shape = MaterialTheme.shapes.small)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "SCANNING",
+                    color = Color.Green,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
             }
         }
         
@@ -176,21 +195,19 @@ fun OscilloscopeScreen(
         Spacer(modifier = Modifier.height(16.dp))
         
         // Vista previa de cámara (pequeña, para referencia)
-        if (isScanning) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(150.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = Color.Black
-                )
-            ) {
-                CameraPreview(
-                    oscilloscope = oscilloscope,
-                    lifecycleOwner = lifecycleOwner,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = Color.Black
+            )
+        ) {
+            CameraPreview(
+                oscilloscope = oscilloscope,
+                lifecycleOwner = lifecycleOwner,
+                modifier = Modifier.fillMaxSize()
+            )
         }
         
         Spacer(modifier = Modifier.height(16.dp))
@@ -309,9 +326,8 @@ private fun CameraPreview(
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
                 
-                // Configuración para máxima sensibilidad
+                // Configuración estándar sin filtros
                 val imageAnalysis = ImageAnalysis.Builder()
-                    .setTargetResolution(android.util.Size(640, 480))
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                     .also {
@@ -322,16 +338,11 @@ private fun CameraPreview(
                 
                 try {
                     cameraProvider.unbindAll()
-                    val camera = cameraProvider.bindToLifecycle(
+                    cameraProvider.bindToLifecycle(
                         lifecycleOwner,
                         cameraSelector,
                         preview,
                         imageAnalysis
-                    )
-                    
-                    // Configurar exposición máxima
-                    camera.cameraControl.setExposureCompensationIndex(
-                        camera.cameraInfo.exposureState.exposureCompensationRange.upper
                     )
                     
                 } catch (e: Exception) {

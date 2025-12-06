@@ -43,11 +43,18 @@ fi
 echo -e "${GREEN}✓ Compilación exitosa${NC}"
 
 echo -e "\n${BLUE}📦 Instalando en dispositivo...${NC}"
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+# Primero intentamos sobrescribir la app existente
+adb install -r app/build/outputs/apk/debug/app-debug.apk 2>/dev/null
 
 if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Error en la instalación${NC}"
-    exit 1
+    echo -e "${YELLOW}⚠ No se pudo sobrescribir, eliminando versión anterior...${NC}"
+    adb uninstall com.nicobutter.beaconchat 2>/dev/null
+    echo -e "${YELLOW}↻ Instalando versión nueva...${NC}"
+    adb install app/build/outputs/apk/debug/app-debug.apk
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ Error en la instalación${NC}"
+        exit 1
+    fi
 fi
 
 echo -e "${GREEN}✓ Instalación exitosa${NC}"
