@@ -24,6 +24,7 @@ Y esa linterna puede gritar por vos.
 **BeaconChat** convierte tu teléfono en un **faro de emergencia** que:
 - Envía mensajes codificados en **código Morse** con la linterna LED
 - Usa la **vibración** como canal táctil (para personas sepultadas)
+- **Detecta vibraciones** usando el acelerómetro - comunicación sin luz
 - Permite que **cualquier otro celular** lo lea con su cámara
 - Funciona **100% offline**
 - Incluye tu **última ubicación GPS conocida** (Próximamente)
@@ -144,6 +145,13 @@ Decodifica señales del entorno con procesamiento avanzado:
   - Detección automática de marcadores START/END
   - Decodificación Morse multi-idioma (9 alfabetos)
   - Visualización en tiempo real de intensidad lumínica
+- **📳 Detección de Vibración (Osciloscopio Táctil):**
+  - Captura vía acelerómetro a ~200Hz
+  - Filtro pasa-alto elimina gravedad constante
+  - Detección de patrones Morse por contacto directo
+  - Funciona en oscuridad total sin línea de visión
+  - Ideal para personas sepultadas o comunicación silenciosa
+  - Visualización en tiempo real de magnitud de vibración
 - **🔍 Escáner QR:** Lee códigos QR generados por otros usuarios de BeaconChat
 
 ### 📡 Bluetooth Mesh (Radar)

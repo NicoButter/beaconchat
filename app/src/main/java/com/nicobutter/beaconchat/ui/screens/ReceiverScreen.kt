@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,17 +37,20 @@ import kotlin.coroutines.suspendCoroutine
 /**
  * Receiver screen for detecting and decoding incoming messages.
  *
- * Provides camera-based detection for both light signals (Morse code) and QR codes.
+ * Provides camera-based detection for both light signals (Morse code) and QR codes,
+ * plus vibration detection via accelerometer.
  * Handles camera permissions, switches between detection modes, and displays
  * decoded messages in real-time.
  *
  * @param modifier Modifier for customizing the layout
  * @param lifecycleOwner Lifecycle owner for camera management
+ * @param onNavigateToVibrationDetector Callback to navigate to vibration detector screen
  */
 @Composable
 fun ReceiverScreen(
         modifier: Modifier = Modifier,
-        lifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current
+        lifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current,
+        onNavigateToVibrationDetector: () -> Unit = {}
 ) {
         val context = LocalContext.current
         var isLightOn by remember { mutableStateOf(false) }
@@ -155,6 +159,12 @@ fun ReceiverScreen(
                                         onClick = { isQrMode = true },
                                         label = { Text("QR Code") },
                                         leadingIcon = { Icon(Icons.Default.Search, null) }
+                                )
+                                FilterChip(
+                                        selected = false,
+                                        onClick = onNavigateToVibrationDetector,
+                                        label = { Text("Vibración") },
+                                        leadingIcon = { Icon(Icons.Default.Settings, null) }
                                 )
                         }
 

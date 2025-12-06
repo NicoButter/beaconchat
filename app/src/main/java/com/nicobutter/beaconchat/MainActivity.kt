@@ -29,6 +29,7 @@ import com.nicobutter.beaconchat.ui.screens.OscilloscopeScreen
 import com.nicobutter.beaconchat.ui.screens.ReceiverScreen
 import com.nicobutter.beaconchat.ui.screens.SettingsScreen
 import com.nicobutter.beaconchat.ui.screens.TransmitterScreen
+import com.nicobutter.beaconchat.ui.screens.VibrationDetectorScreen
 import com.nicobutter.beaconchat.ui.screens.WelcomeScreen
 import com.nicobutter.beaconchat.ui.screens.EmergencyTransmissionScreen
 import com.nicobutter.beaconchat.ui.screens.EmergencyType
@@ -241,7 +242,18 @@ class MainActivity : ComponentActivity() {
                                                                         Modifier.padding(
                                                                                 innerPadding
                                                                         ),
-                                                                lifecycleOwner = this@MainActivity
+                                                                lifecycleOwner = this@MainActivity,
+                                                                onNavigateToVibrationDetector = {
+                                                                        cleanupControllers()
+                                                                        currentScreen = "vibrationDetector"
+                                                                }
+                                                        )
+                                                "vibrationDetector" ->
+                                                        VibrationDetectorScreen(
+                                                                onNavigateBack = {
+                                                                        cleanupControllers()
+                                                                        currentScreen = "receive"
+                                                                }
                                                         )
                                                 "mesh" ->
                                                         MeshScreen(

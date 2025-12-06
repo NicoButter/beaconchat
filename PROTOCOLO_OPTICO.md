@@ -234,6 +234,146 @@ when {
 
 ---
 
+## 📳 Protocolo de Comunicación Táctil (Vibración)
+
+### 📡 Descripción General
+
+BeaconChat implementa un **protocolo de comunicación táctil** usando el acelerómetro para detectar patrones de vibración Morse. Este canal permite comunicación en situaciones donde la luz no es viable:
+
+- ✅ **Entornos completamente oscuros**
+- ✅ **Línea de visión obstruida**
+- ✅ **Personas sepultadas bajo escombros**
+- ✅ **Comunicación silenciosa sin luz visible**
+- ✅ **Transmisión a través de superficies sólidas**
+
+### 🔬 Principio de Funcionamiento
+
+El motor de vibración del smartphone genera aceleración detectable por el acelerómetro:
+
+```
+Vibración ON → Aceleración ~2-5 m/s²
+Vibración OFF → Aceleración ~0 m/s² (solo gravedad)
+```
+
+**Pipeline de detección:**
+1. **Captura**: Acelerómetro a ~200Hz (SENSOR_DELAY_FASTEST)
+2. **Filtrado**: Eliminar componente de gravedad constante (9.8 m/s²)
+3. **Cálculo de magnitud**: √(x² + y² + z²) de aceleración lineal
+4. **Suavizado exponencial**: α = 0.7 para eliminar jitter
+5. **Normalización**: Escalar a rango 0.0-1.0
+6. **Detección de pulsos**: Umbral dinámico al 40% del rango
+7. **Decodificación Morse**: Mismo timing que protocolo óptico
+
+### ⚙️ Características Técnicas
+
+#### Filtro Pasa-Alto (Eliminación de Gravedad)
+
+```kotlin
+// Gravedad usando filtro pasa-bajo
+gravity[i] = 0.8 × gravity[i-1] + 0.2 × accel[i]
+
+// Aceleración lineal
+linear[i] = accel[i] - gravity[i]
+
+// Magnitud de vibración
+magnitude = √(linear_x² + linear_y² + linear_z²)
+```
+
+**Parámetros:**
+- **Factor gravedad (α)**: 0.8 (filtro pasa-bajo)
+- **Factor suavizado**: 0.7 (eliminar jitter)
+- **Frecuencia de muestreo**: ~200Hz
+
+#### Timing de Detección
+
+Usa el **mismo timing que el protocolo óptico** para mantener compatibilidad:
+
+| Rango | Clasificación | Descripción |
+|-------|---------------|-------------|
+| < 80ms | RUIDO | Descartado (movimientos bruscos) |
+| 80-250ms | DOT | Punto Morse |
+| 250-600ms | DASH | Raya Morse |
+| > 600ms | GAP (letra) | Espacio entre letras |
+| > 1500ms | GAP (palabra) | Espacio entre palabras |
+
+#### Umbral Dinámico
+
+```kotlin
+threshold = min + (max - min) × 0.4
+```
+
+Se adapta automáticamente a:
+- Intensidad del motor de vibración
+- Distancia entre dispositivos
+- Material de la superficie de contacto
+- Nivel de ruido ambiental (movimiento)
+
+### 💡 Modo de Uso
+
+**Transmisión:**
+1. Abrir pantalla "Transmitir"
+2. Escribir mensaje
+3. Seleccionar canal "Vibración"
+4. Presionar "Transmitir"
+5. Dispositivo vibra el patrón Morse
+
+**Recepción:**
+1. Abrir pantalla "Detectar"
+2. Seleccionar "Vibración"
+3. **Colocar ambos dispositivos en contacto directo** (superficie contra superficie)
+4. Presionar "Iniciar Detección"
+5. El osciloscopio muestra el patrón de vibración en tiempo real
+6. Mensaje decodificado aparece automáticamente
+
+### 📊 Visualización en Tiempo Real
+
+El osciloscopio de vibración muestra:
+- **Gráfico de magnitud**: Visualización en tiempo real de la intensidad de vibración
+- **Umbral dinámico**: Línea amarilla indica nivel de detección
+- **Estadísticas**: Min/Max/Promedio/Actual en m/s²
+- **Pulsos detectados**: Contador de DOT/DASH identificados
+- **Mensaje decodificado**: Texto resultante de la decodificación
+
+### 🎯 Casos de Uso Específicos
+
+#### Persona Sepultada
+```
+Víctima → Vibra celular contra escombro → Ondas vibratorias se propagan
+Rescatista → Acerca celular a superficie → Acelerómetro detecta patrón
+Resultado → Mensaje "AYUDA" + ubicación aproximada
+```
+
+#### Comunicación Silenciosa
+```
+Situación de riesgo → No se puede emitir luz
+Transmisor → Vibra mensaje en bolsillo/contra pared
+Receptor → Detecta vibraciones por contacto
+Resultado → Comunicación encubierta sin señales visibles
+```
+
+#### Transmisión a Través de Materiales
+```
+Muro/puerta/ventana → Superficie rígida conduce vibración
+Lado A → Vibra mensaje contra superficie
+Lado B → Detecta vibración del otro lado
+Resultado → Comunicación sin línea de visión
+```
+
+### ⚠️ Limitaciones
+
+- **Distancia**: Requiere contacto directo o proximidad < 5cm
+- **Superficies**: Mejor con materiales rígidos (madera, metal, vidrio)
+- **Ruido**: Sensible a movimiento del dispositivo receptor
+- **Batería**: El motor de vibración consume más energía que LED
+
+### 🔬 Referencias Técnicas
+
+- **Android SensorManager**: [TYPE_ACCELEROMETER](https://developer.android.com/reference/android/hardware/Sensor#TYPE_ACCELEROMETER)
+- **Filtros de acelerómetro**: [Eliminar gravedad](https://developer.android.com/guide/topics/sensors/sensors_motion#sensors-motion-accel)
+- **Procesamiento de señal**: Filtro pasa-alto + suavizado exponencial
+
+---
+
 ## 🌍 Soporte Multi-Idioma
 
 BeaconChat soporta **9 sistemas de escritura diferentes** con sus respectivos alfabetos Morse:
