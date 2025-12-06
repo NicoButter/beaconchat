@@ -178,10 +178,14 @@ class SoundController {
     fun cleanup() {
         try {
             stopAudio()
+            // Give hardware time to release
+            Thread.sleep(50)
             Log.d(TAG, "Audio cleaned up")
         } catch (e: Exception) {
             Log.e(TAG, "Error during cleanup", e)
         }
+        // Reset callback
+        onStateChange = null
     }
 
     companion object {

@@ -127,10 +127,14 @@ class VibrationController(context: Context) {
     fun cleanup() {
         try {
             vibrator.cancel()
+            // Give hardware time to release
+            Thread.sleep(50)
             Log.d(TAG, "Vibrator cleaned up")
         } catch (e: Exception) {
             Log.e(TAG, "Error during cleanup", e)
         }
+        // Reset callback
+        onStateChange = null
     }
 
     companion object {

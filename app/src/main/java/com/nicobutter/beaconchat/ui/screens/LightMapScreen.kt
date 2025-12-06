@@ -100,10 +100,19 @@ fun LightMapScreen(
     LaunchedEffect(isHeartbeatActive) {
         if (isHeartbeatActive) {
             while (isActive) {
-                val heartbeat = HeartbeatPattern.generateHeartbeat()
-                flashlightController.transmit(heartbeat)
-                delay(HeartbeatPattern.HEARTBEAT_INTERVAL)
+                try {
+                    val heartbeat = HeartbeatPattern.generateHeartbeat()
+                    flashlightController.transmit(heartbeat)
+                    delay(HeartbeatPattern.HEARTBEAT_INTERVAL)
+                } catch (e: Exception) {
+                    // Si hay error, detener el heartbeat
+                    isHeartbeatActive = false
+                    break
+                }
             }
+        } else {
+            // Asegurar que la linterna se apague cuando se desactiva el heartbeat
+            flashlightController.stop()
         }
     }
     
@@ -113,6 +122,9 @@ fun LightMapScreen(
             // Detener heartbeat y limpiar flash
             isHeartbeatActive = false
             isScanningActive = false
+            flashlightController.stop()
+            // Dar tiempo para que se libere el mutex antes de cleanup
+            Thread.sleep(50)
             flashlightController.cleanup()
         }
     }

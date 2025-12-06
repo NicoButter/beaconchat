@@ -95,12 +95,18 @@ fun TransmitterScreen(
                     EncodingType.ASCII_BINARY -> binaryEncoder.encode(message)
                 }
                 while (isActive && isTransmitting) {
-                    when (selectedMethod) {
-                        TransmissionMethod.FLASHLIGHT -> flashlightController.transmit(timings)
-                        TransmissionMethod.VIBRATION -> vibrationController.transmit(timings)
-                        TransmissionMethod.SOUND -> soundController.transmit(timings)
+                    try {
+                        when (selectedMethod) {
+                            TransmissionMethod.FLASHLIGHT -> flashlightController.transmit(timings)
+                            TransmissionMethod.VIBRATION -> vibrationController.transmit(timings)
+                            TransmissionMethod.SOUND -> soundController.transmit(timings)
+                        }
+                        kotlinx.coroutines.delay(500)
+                    } catch (e: Exception) {
+                        // Si hay error, detener la transmisión
+                        isTransmitting = false
+                        break
                     }
-                    kotlinx.coroutines.delay(500)
                 }
             }
         }
@@ -116,16 +122,21 @@ fun TransmitterScreen(
         if (message.isNotBlank()) {
             isTransmitting = true
             scope.launch {
-                val timings = when (selectedEncoding) {
-                    EncodingType.MORSE -> morseEncoder.encode(message)
-                    EncodingType.ASCII_BINARY -> binaryEncoder.encode(message)
+                try {
+                    val timings = when (selectedEncoding) {
+                        EncodingType.MORSE -> morseEncoder.encode(message)
+                        EncodingType.ASCII_BINARY -> binaryEncoder.encode(message)
+                    }
+                    when (selectedMethod) {
+                        TransmissionMethod.FLASHLIGHT -> flashlightController.transmit(timings)
+                        TransmissionMethod.VIBRATION -> vibrationController.transmit(timings)
+                        TransmissionMethod.SOUND -> soundController.transmit(timings)
+                    }
+                } catch (e: Exception) {
+                    // Log error but continue
+                } finally {
+                    isTransmitting = false
                 }
-                when (selectedMethod) {
-                    TransmissionMethod.FLASHLIGHT -> flashlightController.transmit(timings)
-                    TransmissionMethod.VIBRATION -> vibrationController.transmit(timings)
-                    TransmissionMethod.SOUND -> soundController.transmit(timings)
-                }
-                isTransmitting = false
             }
         }
     }

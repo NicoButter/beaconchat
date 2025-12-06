@@ -158,7 +158,13 @@ class FlashlightController(context: Context) {
     fun stop() {
         isStopped = true
         // Immediately turn off flashlight
-        cameraId?.let { ensureFlashlightOff(it) }
+        cameraId?.let { id ->
+            try {
+                ensureFlashlightOff(id)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping flashlight", e)
+            }
+        }
     }
 
     /**
@@ -169,9 +175,12 @@ class FlashlightController(context: Context) {
      * remaining on.
      */
     fun cleanup() {
+        // Set stop flag to interrupt any ongoing transmission
+        isStopped = true
         cameraId?.let { id ->
             try {
                 ensureFlashlightOff(id)
+                Log.d(TAG, "Flashlight cleaned up successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "Error during cleanup", e)
             }

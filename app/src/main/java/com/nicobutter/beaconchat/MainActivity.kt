@@ -30,6 +30,9 @@ import com.nicobutter.beaconchat.ui.screens.ReceiverScreen
 import com.nicobutter.beaconchat.ui.screens.SettingsScreen
 import com.nicobutter.beaconchat.ui.screens.TransmitterScreen
 import com.nicobutter.beaconchat.ui.screens.WelcomeScreen
+import com.nicobutter.beaconchat.ui.screens.EmergencyTransmissionScreen
+import com.nicobutter.beaconchat.ui.screens.EmergencyType
+import com.nicobutter.beaconchat.ui.screens.EmergencyMethod
 import com.nicobutter.beaconchat.ui.theme.BeaconChatTheme
 
 /**
@@ -89,11 +92,13 @@ class MainActivity : ComponentActivity() {
                                         color = MaterialTheme.colorScheme.background
                                 ) {
                                         var currentScreen by remember { mutableStateOf("welcome") }
+                                        var emergencyType by remember { mutableStateOf<EmergencyType?>(null) }
+                                        var emergencyMethod by remember { mutableStateOf(EmergencyMethod.LIGHT) }
 
                                 Scaffold(
                                         modifier = Modifier.fillMaxSize(),
                                         bottomBar = {
-                                                if (currentScreen != "welcome") {
+                                                if (currentScreen != "welcome" && currentScreen != "emergency") {
                                                         NavigationBar {
                                                                 NavigationBarItem(
                                                                         selected =
@@ -182,11 +187,40 @@ class MainActivity : ComponentActivity() {
                                                                         cleanupControllers()
                                                                         currentScreen = "receive"
                                                                 },
+                                                                onEmergencySOS = {
+                                                                        cleanupControllers()
+                                                                        emergencyType = EmergencyType.SOS
+                                                                        emergencyMethod = EmergencyMethod.ALL
+                                                                        currentScreen = "emergency"
+                                                                },
+                                                                onEmergencyHelp = {
+                                                                        cleanupControllers()
+                                                                        emergencyType = EmergencyType.HELP
+                                                                        emergencyMethod = EmergencyMethod.ALL
+                                                                        currentScreen = "emergency"
+                                                                },
                                                                 modifier =
                                                                         Modifier.padding(
                                                                                 innerPadding
                                                                         )
                                                         )
+                                                "emergency" ->
+                                                        emergencyType?.let { type ->
+                                                                EmergencyTransmissionScreen(
+                                                                        emergencyType = type,
+                                                                        method = emergencyMethod,
+                                                                        flashlightController = flashlightController,
+                                                                        vibrationController = vibrationController,
+                                                                        soundController = soundController,
+                                                                        morseEncoder = morseEncoder,
+                                                                        onDismiss = {
+                                                                                cleanupControllers()
+                                                                                currentScreen = "welcome"
+                                                                                emergencyType = null
+                                                                        },
+                                                                        modifier = Modifier.fillMaxSize()
+                                                                )
+                                                        }
                                                 "transmit" ->
                                                         TransmitterScreen(
                                                                 flashlightController =
