@@ -123,11 +123,22 @@ fun MeshScreen(
     val isSending by meshController.isSending.collectAsState()
     val lastError by meshController.lastError.collectAsState()
 
-    // Auto-start if permissions granted
-    LaunchedEffect(hasPermissions, bluetoothEnabled) {
-        if (hasPermissions && bluetoothEnabled) {
+    // Estado para controlar si el usuario quiere auto-escaneo
+    var autoScanEnabled by remember { mutableStateOf(true) }
+
+    // Auto-start SOLO si el usuario tiene auto-scan habilitado
+    LaunchedEffect(hasPermissions, bluetoothEnabled, autoScanEnabled) {
+        if (hasPermissions && bluetoothEnabled && autoScanEnabled) {
             if (!isScanning) meshController.startScanning()
             if (!isAdvertising && callsign.isNotBlank()) meshController.startAdvertising(callsign)
+        }
+    }
+
+    // Cleanup BLE when leaving screen to avoid conflicts with flashlight
+    DisposableEffect(Unit) {
+        onDispose {
+            meshController.stopScanning()
+            meshController.stopAdvertising()
         }
     }
 
@@ -209,37 +220,72 @@ fun MeshScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text(
-                                        text = "Callsign: $callsign",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                        text =
-                                                if (isAdvertising) "Visible (Anunciando)"
-                                                else "Invisible",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (isAdvertising) Color(0xFF2E7D32) else Color.Gray
+                        Column {
+                            Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                            text = "Callsign: $callsign",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                            text =
+                                                    if (isAdvertising) "Visible (Anunciando)"
+                                                    else "Invisible",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isAdvertising) Color(0xFF2E7D32) else Color.Gray
+                                    )
+                                }
+                                Switch(
+                                        checked = isAdvertising,
+                                        onCheckedChange = { enabled ->
+                                            if (enabled) {
+                                                meshController.startAdvertising(callsign)
+                                            } else {
+                                                meshController.stopAdvertising()
+                                            }
+                                        },
+                                        enabled = hasPermissions && bluetoothEnabled
                                 )
                             }
-                            Switch(
-                                    checked = isAdvertising,
-                                    onCheckedChange = { enabled ->
-                                        if (enabled) {
-                                            meshController.startAdvertising(callsign)
-                                            meshController.startScanning()
-                                        } else {
-                                            meshController.stopAdvertising()
-                                            meshController.stopScanning()
-                                        }
-                                    },
-                                    enabled = hasPermissions && bluetoothEnabled
-                            )
+                            
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            // Botones de control de escaneo
+                            Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                        onClick = { 
+                                            autoScanEnabled = true
+                                            meshController.startScanning() 
+                                        },
+                                        enabled = hasPermissions && bluetoothEnabled && !isScanning,
+                                        modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Iniciar Escaneo")
+                                }
+                                
+                                OutlinedButton(
+                                        onClick = { 
+                                            autoScanEnabled = false
+                                            meshController.stopScanning() 
+                                        },
+                                        enabled = hasPermissions && bluetoothEnabled && isScanning,
+                                        modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Detener")
+                                }
+                            }
                         }
                     }
                 }

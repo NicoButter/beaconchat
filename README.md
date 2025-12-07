@@ -193,12 +193,21 @@ make install
 
 ### Despliegue de Producción
 ```bash
-# Build completo con limpieza
+# Build completo con limpieza e instalación
+# Guarda APK automáticamente en releases/
 make deploy
+
+# Listar APKs generados
+make apks
 
 # Build de release (APK firmado)
 ./gradlew assembleRelease
 ```
+
+**📦 APKs Generados:**
+Cada `make deploy` crea automáticamente dos archivos en `releases/`:
+- `BeaconChat_YYYYMMDD_HHMMSS.apk` - Versión con timestamp
+- `BeaconChat_latest.apk` - Última versión (sobrescrita cada deploy)
 
 📖 **[Ver guía completa de desarrollo →](QUICKSTART.md)**
 

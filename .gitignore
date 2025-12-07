@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# APK releases (mantener localmente, no subir a git)
+/releases/
+*.apk

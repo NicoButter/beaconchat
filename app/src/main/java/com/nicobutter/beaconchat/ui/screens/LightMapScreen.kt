@@ -343,11 +343,9 @@ private fun CameraPreview(
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
                 
-                // Configuración optimizada para máxima sensibilidad a flashes
+                // Configuración estándar de cámara (sin optimizaciones que interfieren)
                 val imageAnalysis = ImageAnalysis.Builder()
-                    .setTargetResolution(android.util.Size(640, 480)) // Resolución baja para mejor performance
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setImageQueueDepth(1) // Solo mantener 1 frame en cola
                     .build()
                     .also {
                         it.setAnalyzer(Executors.newSingleThreadExecutor(), lightScanner)
@@ -357,21 +355,12 @@ private fun CameraPreview(
                 
                 try {
                     provider.unbindAll()
-                    val camera = provider.bindToLifecycle(
+                    provider.bindToLifecycle(
                         lifecycleOwner,
                         cameraSelector,
                         preview,
                         imageAnalysis
                     )
-                    
-                    // Configurar cámara para máxima sensibilidad a flashes
-                    camera.cameraControl.setExposureCompensationIndex(
-                        camera.cameraInfo.exposureState.exposureCompensationRange.upper
-                    )
-                    
-                    // Configurar foco infinito para mejor detección de flashes distantes
-                    camera.cameraControl.setLinearZoom(0f)
-                    
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }

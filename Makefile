@@ -1,4 +1,4 @@
-.PHONY: help deploy quick clean-deploy build devices logs clean uninstall watch
+.PHONY: help deploy quick clean-deploy build devices logs clean uninstall watch apks
 
 # Configuración de Java
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
@@ -51,3 +51,14 @@ install-tools: ## Instala herramientas necesarias
 	@echo "Instalando herramientas de desarrollo Android..."
 	@sudo dnf install -y android-tools inotify-tools
 	@echo "✅ Herramientas instaladas"
+
+apks: ## Lista APKs generados
+	@echo "📦 APKs Disponibles:"
+	@echo ""
+	@if [ -d "releases" ]; then \
+		ls -lht releases/*.apk 2>/dev/null | awk '{printf "  %s %s  \033[36m%-30s\033[0m (%s)\n", $$6, $$7, $$9, $$5}' || echo "  No hay APKs generados aún"; \
+	else \
+		echo "  No hay APKs generados aún"; \
+		echo "  Ejecuta 'make deploy' para crear uno"; \
+	fi
+	@echo ""

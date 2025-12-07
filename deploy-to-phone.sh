@@ -59,6 +59,22 @@ fi
 
 echo -e "${GREEN}✓ Instalación exitosa${NC}"
 
+echo -e "\n${BLUE}📦 Copiando APK a la raíz del proyecto...${NC}"
+# Crear directorio releases si no existe
+mkdir -p releases
+
+# Copiar APK con timestamp
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+APK_NAME="BeaconChat_${TIMESTAMP}.apk"
+cp app/build/outputs/apk/debug/app-debug.apk "releases/${APK_NAME}"
+
+# También mantener una copia como "latest"
+cp app/build/outputs/apk/debug/app-debug.apk "releases/BeaconChat_latest.apk"
+
+echo -e "${GREEN}✓ APK guardado en:${NC}"
+echo -e "  ${YELLOW}releases/${APK_NAME}${NC}"
+echo -e "  ${YELLOW}releases/BeaconChat_latest.apk${NC}"
+
 echo -e "\n${BLUE}🚀 Iniciando BeaconChat en el dispositivo...${NC}"
 adb shell am start -n com.nicobutter.beaconchat/.MainActivity
 
