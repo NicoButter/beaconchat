@@ -9,8 +9,6 @@
 <!-- LOGO PLACEHOLDER -->
 <p align="center">
   <img src="docs/logo.png" alt="BeaconChat Logo" width="200"/>
-  <br>
-  <i>(Logo Pendiente)</i>
 </p>
 
 > **Una luz. Un celular. Una vida salvada.**
