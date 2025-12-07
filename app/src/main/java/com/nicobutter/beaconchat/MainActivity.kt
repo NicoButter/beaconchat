@@ -3,8 +3,15 @@ package com.nicobutter.beaconchat
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -16,6 +23,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.nicobutter.beaconchat.data.UserPreferences
 import com.nicobutter.beaconchat.mesh.BLEMeshController
@@ -100,78 +112,237 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.fillMaxSize(),
                                         bottomBar = {
                                                 if (currentScreen != "welcome" && currentScreen != "emergency") {
-                                                        NavigationBar {
+                                                        NavigationBar(
+                                                                containerColor = MaterialTheme.colorScheme.surface,
+                                                                tonalElevation = 8.dp
+                                                        ) {
+                                                                // Transmit
                                                                 NavigationBarItem(
-                                                                        selected =
-                                                                                currentScreen ==
-                                                                                        "transmit",
+                                                                        selected = currentScreen == "transmit",
                                                                         onClick = {
                                                                                 cleanupControllers()
-                                                                                currentScreen =
-                                                                                        "transmit"
+                                                                                currentScreen = "transmit"
                                                                         },
-                                                                        icon = { Text("🔦") },
-                                                                        label = { Text("Transmit") }
+                                                                        icon = {
+                                                                                val scale by animateFloatAsState(
+                                                                                        targetValue = if (currentScreen == "transmit") 1.2f else 1f,
+                                                                                        animationSpec = tween(durationMillis = 200),
+                                                                                        label = "transmit_scale"
+                                                                                )
+                                                                                Box {
+                                                                                        if (currentScreen == "transmit") {
+                                                                                                Box(
+                                                                                                        modifier = Modifier
+                                                                                                                .size(48.dp)
+                                                                                                                .background(
+                                                                                                                        MaterialTheme.colorScheme.primaryContainer,
+                                                                                                                        CircleShape
+                                                                                                                )
+                                                                                                )
+                                                                                        }
+                                                                                        Text(
+                                                                                                text = "🔦",
+                                                                                                fontSize = 24.sp,
+                                                                                                modifier = Modifier.scale(scale)
+                                                                                        )
+                                                                                }
+                                                                        },
+                                                                        label = { 
+                                                                                Text(
+                                                                                        "Transmit",
+                                                                                        fontWeight = if (currentScreen == "transmit") FontWeight.Bold else FontWeight.Normal
+                                                                                )
+                                                                        }
                                                                 )
+                                                                // Receive
                                                                 NavigationBarItem(
-                                                                        selected =
-                                                                                currentScreen ==
-                                                                                        "receive",
+                                                                        selected = currentScreen == "receive",
                                                                         onClick = {
                                                                                 cleanupControllers()
-                                                                                currentScreen =
-                                                                                        "receive"
+                                                                                currentScreen = "receive"
                                                                         },
-                                                                        icon = { Text("📷") },
-                                                                        label = { Text("Receive") }
+                                                                        icon = {
+                                                                                val scale by animateFloatAsState(
+                                                                                        targetValue = if (currentScreen == "receive") 1.2f else 1f,
+                                                                                        animationSpec = tween(durationMillis = 200),
+                                                                                        label = "receive_scale"
+                                                                                )
+                                                                                Box {
+                                                                                        if (currentScreen == "receive") {
+                                                                                                Box(
+                                                                                                        modifier = Modifier
+                                                                                                                .size(48.dp)
+                                                                                                                .background(
+                                                                                                                        MaterialTheme.colorScheme.primaryContainer,
+                                                                                                                        CircleShape
+                                                                                                                )
+                                                                                                )
+                                                                                        }
+                                                                                        Text(
+                                                                                                text = "📷",
+                                                                                                fontSize = 24.sp,
+                                                                                                modifier = Modifier.scale(scale)
+                                                                                        )
+                                                                                }
+                                                                        },
+                                                                        label = { 
+                                                                                Text(
+                                                                                        "Receive",
+                                                                                        fontWeight = if (currentScreen == "receive") FontWeight.Bold else FontWeight.Normal
+                                                                                )
+                                                                        }
                                                                 )
+                                                                // Mesh
                                                                 NavigationBarItem(
-                                                                        selected =
-                                                                                currentScreen ==
-                                                                                        "mesh",
+                                                                        selected = currentScreen == "mesh",
                                                                         onClick = {
                                                                                 cleanupControllers()
-                                                                                currentScreen =
-                                                                                        "mesh"
+                                                                                currentScreen = "mesh"
                                                                         },
-                                                                        icon = { Text("📡") },
-                                                                        label = { Text("Mesh") }
+                                                                        icon = {
+                                                                                val scale by animateFloatAsState(
+                                                                                        targetValue = if (currentScreen == "mesh") 1.2f else 1f,
+                                                                                        animationSpec = tween(durationMillis = 200),
+                                                                                        label = "mesh_scale"
+                                                                                )
+                                                                                Box {
+                                                                                        if (currentScreen == "mesh") {
+                                                                                                Box(
+                                                                                                        modifier = Modifier
+                                                                                                                .size(48.dp)
+                                                                                                                .background(
+                                                                                                                        MaterialTheme.colorScheme.primaryContainer,
+                                                                                                                        CircleShape
+                                                                                                                )
+                                                                                                )
+                                                                                        }
+                                                                                        Text(
+                                                                                                text = "📡",
+                                                                                                fontSize = 24.sp,
+                                                                                                modifier = Modifier.scale(scale)
+                                                                                        )
+                                                                                }
+                                                                        },
+                                                                        label = { 
+                                                                                Text(
+                                                                                        "Mesh",
+                                                                                        fontWeight = if (currentScreen == "mesh") FontWeight.Bold else FontWeight.Normal
+                                                                                )
+                                                                        }
                                                                 )
+                                                                // Radar
                                                                 NavigationBarItem(
-                                                                        selected =
-                                                                                currentScreen ==
-                                                                                        "lightmap",
+                                                                        selected = currentScreen == "lightmap",
                                                                         onClick = {
                                                                                 cleanupControllers()
-                                                                                currentScreen =
-                                                                                        "lightmap"
+                                                                                currentScreen = "lightmap"
                                                                         },
-                                                                        icon = { Text("🎯") },
-                                                                        label = { Text("Radar") }
+                                                                        icon = {
+                                                                                val scale by animateFloatAsState(
+                                                                                        targetValue = if (currentScreen == "lightmap") 1.2f else 1f,
+                                                                                        animationSpec = tween(durationMillis = 200),
+                                                                                        label = "radar_scale"
+                                                                                )
+                                                                                Box {
+                                                                                        if (currentScreen == "lightmap") {
+                                                                                                Box(
+                                                                                                        modifier = Modifier
+                                                                                                                .size(48.dp)
+                                                                                                                .background(
+                                                                                                                        MaterialTheme.colorScheme.primaryContainer,
+                                                                                                                        CircleShape
+                                                                                                                )
+                                                                                                )
+                                                                                        }
+                                                                                        Text(
+                                                                                                text = "🎯",
+                                                                                                fontSize = 24.sp,
+                                                                                                modifier = Modifier.scale(scale)
+                                                                                        )
+                                                                                }
+                                                                        },
+                                                                        label = { 
+                                                                                Text(
+                                                                                        "Radar",
+                                                                                        fontWeight = if (currentScreen == "lightmap") FontWeight.Bold else FontWeight.Normal
+                                                                                )
+                                                                        }
                                                                 )
+                                                                // Oscilloscope
                                                                 NavigationBarItem(
-                                                                        selected =
-                                                                                currentScreen ==
-                                                                                        "oscilloscope",
+                                                                        selected = currentScreen == "oscilloscope",
                                                                         onClick = {
                                                                                 cleanupControllers()
-                                                                                currentScreen =
-                                                                                        "oscilloscope"
+                                                                                currentScreen = "oscilloscope"
                                                                         },
-                                                                        icon = { Text("📊") },
-                                                                        label = { Text("Scope") }
+                                                                        icon = {
+                                                                                val scale by animateFloatAsState(
+                                                                                        targetValue = if (currentScreen == "oscilloscope") 1.2f else 1f,
+                                                                                        animationSpec = tween(durationMillis = 200),
+                                                                                        label = "scope_scale"
+                                                                                )
+                                                                                Box {
+                                                                                        if (currentScreen == "oscilloscope") {
+                                                                                                Box(
+                                                                                                        modifier = Modifier
+                                                                                                                .size(48.dp)
+                                                                                                                .background(
+                                                                                                                        MaterialTheme.colorScheme.primaryContainer,
+                                                                                                                        CircleShape
+                                                                                                                )
+                                                                                                )
+                                                                                        }
+                                                                                        Text(
+                                                                                                text = "📊",
+                                                                                                fontSize = 24.sp,
+                                                                                                modifier = Modifier.scale(scale)
+                                                                                        )
+                                                                                }
+                                                                        },
+                                                                        label = { 
+                                                                                Text(
+                                                                                        "Scope",
+                                                                                        fontWeight = if (currentScreen == "oscilloscope") FontWeight.Bold else FontWeight.Normal
+                                                                                )
+                                                                        }
                                                                 )
+                                                                // Settings
                                                                 NavigationBarItem(
-                                                                        selected =
-                                                                                currentScreen ==
-                                                                                        "settings",
+                                                                        selected = currentScreen == "settings",
                                                                         onClick = {
                                                                                 cleanupControllers()
-                                                                                currentScreen =
-                                                                                        "settings"
+                                                                                currentScreen = "settings"
                                                                         },
-                                                                        icon = { Text("⚙️") },
-                                                                        label = { Text("Settings") }
+                                                                        icon = {
+                                                                                val scale by animateFloatAsState(
+                                                                                        targetValue = if (currentScreen == "settings") 1.2f else 1f,
+                                                                                        animationSpec = tween(durationMillis = 200),
+                                                                                        label = "settings_scale"
+                                                                                )
+                                                                                Box {
+                                                                                        if (currentScreen == "settings") {
+                                                                                                Box(
+                                                                                                        modifier = Modifier
+                                                                                                                .size(48.dp)
+                                                                                                                .background(
+                                                                                                                        MaterialTheme.colorScheme.primaryContainer,
+                                                                                                                        CircleShape
+                                                                                                                )
+                                                                                                )
+                                                                                        }
+                                                                                        Text(
+                                                                                                text = "⚙️",
+                                                                                                fontSize = 24.sp,
+                                                                                                modifier = Modifier.scale(scale)
+                                                                                        )
+                                                                                }
+                                                                        },
+                                                                        label = { 
+                                                                                Text(
+                                                                                        "Settings",
+                                                                                        fontWeight = if (currentScreen == "settings") FontWeight.Bold else FontWeight.Normal
+                                                                                )
+                                                                        }
                                                                 )
                                                         }
                                                 }
