@@ -2,8 +2,13 @@ package com.nicobutter.beaconchat.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CameraMetadata
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -82,6 +87,7 @@ fun ReceiverScreen(
         }
 
         // Camera setup
+        @OptIn(ExperimentalCamera2Interop::class)
         LaunchedEffect(hasCameraPermission, isQrMode) {
                 if (hasCameraPermission) {
                         val cameraProvider = ProcessCameraProvider.getInstance(context).await()
@@ -91,12 +97,57 @@ fun ReceiverScreen(
                                         it.setSurfaceProvider(previewView.surfaceProvider)
                                 }
 
-                        val imageAnalysis =
-                                ImageAnalysis.Builder()
-                                        .setBackpressureStrategy(
-                                                ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
-                                        )
-                                        .build()
+                        // CONFIGURACIÓN CRÍTICA: Control manual de cámara para detección precisa
+                        val imageAnalysisBuilder = ImageAnalysis.Builder()
+                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        
+                        // Aplicar configuraciones Camera2 solo para modo luz (no QR)
+                        if (!isQrMode) {
+                            val camera2Interop = Camera2Interop.Extender(imageAnalysisBuilder)
+                            
+                            // 1. EXPOSURE TIME: Fijar tiempo de exposición CORTO
+                            // Típico: 1/30s = 33ms (30fps), queremos 1/120s = 8ms para reducir lag
+                            // Valor en nanosegundos: 8ms = 8,000,000ns
+                            camera2Interop.setCaptureRequestOption(
+                                CaptureRequest.CONTROL_AE_MODE,
+                                CaptureRequest.CONTROL_AE_MODE_OFF  // Deshabilitar auto-exposure
+                            )
+                            camera2Interop.setCaptureRequestOption(
+                                CaptureRequest.SENSOR_EXPOSURE_TIME,
+                                8_000_000L  // 8ms = 1/120s
+                            )
+                            
+                            // 2. ISO/SENSITIVITY: Fijar ISO bajo para menos ruido
+                            // ISO 100-200 típico, queremos 400 para balance velocidad/calidad
+                            camera2Interop.setCaptureRequestOption(
+                                CaptureRequest.SENSOR_SENSITIVITY,
+                                400  // ISO 400
+                            )
+                            
+                            // 3. FOCUS MODE: Fijar foco en infinito (evitar re-enfoque)
+                            camera2Interop.setCaptureRequestOption(
+                                CaptureRequest.CONTROL_AF_MODE,
+                                CaptureRequest.CONTROL_AF_MODE_OFF
+                            )
+                            camera2Interop.setCaptureRequestOption(
+                                CaptureRequest.LENS_FOCUS_DISTANCE,
+                                0.0f  // 0 = infinito
+                            )
+                            
+                            // 4. WHITE BALANCE: Fijar WB para evitar ajustes durante captura
+                            camera2Interop.setCaptureRequestOption(
+                                CaptureRequest.CONTROL_AWB_MODE,
+                                CaptureRequest.CONTROL_AWB_MODE_OFF
+                            )
+                            
+                            // 5. FRAME RATE: Intentar fijar a 30fps
+                            camera2Interop.setCaptureRequestOption(
+                                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                                android.util.Range(30, 30)
+                            )
+                        }
+                        
+                        val imageAnalysis = imageAnalysisBuilder.build()
 
                         if (isQrMode) {
                                 imageAnalysis.setAnalyzer(
@@ -118,12 +169,36 @@ fun ReceiverScreen(
 
                         try {
                                 cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(
+                                val camera = cameraProvider.bindToLifecycle(
                                         lifecycleOwner,
                                         CameraSelector.DEFAULT_BACK_CAMERA,
                                         preview,
                                         imageAnalysis
                                 )
+                                
+                                // CONFIGURACIÓN CRÍTICA: Reducir exposición para disminuir lag del sensor
+                                // El auto-exposure causa que frames brillantes persistan
+                                if (!isQrMode) {
+                                    try {
+                                        // Reducir compensación de exposición para exposición más rápida
+                                        // Esto reduce la persistencia del sensor cuando el LED se apaga
+                                        // Rango típico en CameraControl: min a max EV
+                                        val cameraControl = camera.cameraControl
+                                        val cameraInfo = camera.cameraInfo
+                                        
+                                        // Obtener rango de exposición soportado
+                                        val exposureState = cameraInfo.exposureState
+                                        val minExposure = exposureState.exposureCompensationRange.lower
+                                        val maxExposure = exposureState.exposureCompensationRange.upper
+                                        
+                                        // Aplicar -1 EV si es soportado
+                                        val targetCompensation = -1.coerceIn(minExposure, maxExposure)
+                                        cameraControl.setExposureCompensationIndex(targetCompensation)
+                                    } catch (e: Exception) {
+                                        // Algunas cámaras no soportan control de exposición
+                                        e.printStackTrace()
+                                    }
+                                }
                         } catch (exc: Exception) {
                                 exc.printStackTrace()
                         }

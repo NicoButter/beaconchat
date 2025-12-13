@@ -38,18 +38,19 @@ import java.util.Locale
  * [MARCADOR INICIO] → [MENSAJE MORSE] → [MARCADOR FIN]
  * ```
  *
- * ### Marcador de Inicio:
+ * ### Preámbulo de Sincronización:
  * ```
- * ON 300ms → OFF 300ms → ON 900ms → OFF 500ms
+ * ON 800ms → OFF 400ms → ON 800ms → OFF 800ms
  * ```
- * Patrón único que permite al receptor:
+ * Patrón LARGO-CORTO-LARGO que permite al receptor:
  * - Sincronizarse con el transmisor
+ * - Calibrar umbrales de detección (luz ON vs OFF)
  * - Diferenciar el mensaje de ruido ambiental
  * - Establecer niveles de referencia de intensidad
  *
  * ### Marcador de Fin:
  * ```
- * OFF 600ms → ON 100ms
+ * OFF 1000ms → ON 200ms
  * ```
  * Señala el término del mensaje y permite:
  * - Detección de mensajes incompletos
@@ -57,29 +58,30 @@ import java.util.Locale
  *
  * ## Tiempos del Protocolo
  *
- * Optimizados para cámaras a 30fps (~33ms/frame):
- * - **DOT**: 150ms (~4-5 frames) - Visible y distinguible
- * - **DASH**: 400ms (~12 frames) - Claramente más largo que DOT
- * - **Espacio símbolo**: 150ms - Separa . y - dentro de una letra
- * - **Espacio letra**: 500ms - Separa letras
- * - **Espacio palabra**: 1000ms - Separa palabras
+ * Optimizados para cámaras a 30fps (33ms/frame):
+ * - **DOT**: 200ms (6 frames) - Mínimo confiable para detección
+ * - **DASH**: 600ms (18 frames) - Ratio 3:1 estándar Morse (ITU-R M.1677)
+ * - **Espacio símbolo**: 200ms - Separa . y - dentro de una letra
+ * - **Espacio letra**: 600ms (3 DOT) - Separa letras
+ * - **Espacio palabra**: 1400ms (7 DOT) - Separa palabras
  *
  * ## Ejemplo de Transmisión
  *
  * Texto: "SOS"
  * ```
- * [INICIO: 300ON-300OFF-900ON-500OFF]
- * S: 150ON-150OFF-150ON-150OFF-150ON-500OFF
- * O: 400ON-150OFF-400ON-150OFF-400ON-500OFF
- * S: 150ON-150OFF-150ON-150OFF-150ON-600OFF
- * [FIN: 100ON]
+ * [INICIO: 800ON-400OFF-800ON-800OFF]
+ * S: 200ON-200OFF-200ON-200OFF-200ON-600OFF
+ * O: 600ON-200OFF-600ON-200OFF-600ON-600OFF
+ * S: 200ON-200OFF-200ON-200OFF-200ON-1000OFF
+ * [FIN: 200ON]
  * ```
- * Duración total: ~6.5 segundos
+ * Duración total: ~10.6 segundos
+ * Total frames @ 30fps: ~318 frames
  *
  * ## Referencias
  * - IEEE 802.15.7 (Visible Light Communication)
+ * - ITU-R M.1677 (International Morse Code Standard)
  * - NIST Search and Rescue Standards
- * - ITU-R M.1677 (Morse Code Standard)
  *
  * @see PROTOCOLO_OPTICO.md para especificación completa
  */
@@ -101,21 +103,26 @@ class MorseEncoder(private val locale: Locale = Locale.getDefault()) {
     fun getFlag(): String = MorseAlphabet.getFlag(locale)
     companion object {
         // Protocolo optimizado para comunicación óptica con cámara
-        // Basado en estándares de robótica de rescate y beacons ópticos
+        // Basado en IEEE 802.15.7 (Visible Light Communication) y ITU-R M.1677
+        // Diseñado para cámaras a 30fps (33ms/frame)
         
-        // Tiempos base del protocolo
-        private const val DOT_DURATION = 150L // ms - Punto
-        private const val DASH_DURATION = 400L // ms - Raya (2.66x DOT)
-        private const val SYMBOL_SPACE = 150L // ms - Entre símbolos de una letra
-        private const val LETTER_SPACE = 500L // ms - Entre letras
-        private const val WORD_SPACE = 1000L // ms - Entre palabras
+        // Tiempos base del protocolo (mínimo 6 frames por DOT = 200ms)
+        private const val DOT_DURATION = 200L // ms - Punto (6 frames @ 30fps)
+        private const val DASH_DURATION = 600L // ms - Raya (3x DOT, estándar Morse)
+        private const val SYMBOL_SPACE = 200L // ms - Entre símbolos de una letra
+        private const val LETTER_SPACE = 600L // ms - Entre letras (3x DOT)
+        private const val WORD_SPACE = 1400L // ms - Entre palabras (7x DOT)
         
-        // Marcadores del protocolo extendido
-        private const val START_MARKER_ON_1 = 300L // Primer pulso ON
-        private const val START_MARKER_OFF = 300L // Espacio
-        private const val START_MARKER_ON_2 = 900L // Segundo pulso ON (largo)
-        private const val END_MARKER_OFF = 600L // Espacio final
-        private const val END_MARKER_ON = 100L // Pulso de fin corto
+        // Preámbulo de sincronización (IEEE 802.15.7 basado)
+        // Patrón: LARGO-CORTO-LARGO para detección de inicio
+        private const val START_MARKER_ON_1 = 800L // Primer pulso LARGO (marca inicio)
+        private const val START_MARKER_OFF = 400L // Espacio MEDIO
+        private const val START_MARKER_ON_2 = 800L // Segundo pulso LARGO (confirmación)
+        private const val START_MARKER_OFF_2 = 800L // Espacio antes del mensaje
+        
+        // Marcador de fin (patrón único para detección)
+        private const val END_MARKER_OFF = 1000L // Espacio final largo
+        private const val END_MARKER_ON = 200L // Pulso de fin = 1 DOT
     }
 
     /** 
@@ -149,12 +156,13 @@ class MorseEncoder(private val locale: Locale = Locale.getDefault()) {
     fun encode(text: String): List<Long> {
         val timings = mutableListOf<Long>()
         
-        // ========== MARCADOR DE INICIO ==========
-        // ON 300 → OFF 300 → ON 900
-        timings.add(START_MARKER_ON_1) // ON 300ms
-        timings.add(START_MARKER_OFF)  // OFF 300ms
-        timings.add(START_MARKER_ON_2) // ON 900ms
-        timings.add(LETTER_SPACE)       // OFF 500ms (separación antes del mensaje)
+        // ========== PREÁMBULO DE SINCRONIZACIÓN ==========
+        // Patrón: LARGO-CORTO-LARGO (IEEE 802.15.7 inspired)
+        // ON 800 → OFF 400 → ON 800 → OFF 800
+        timings.add(START_MARKER_ON_1)  // ON 800ms (LARGO)
+        timings.add(START_MARKER_OFF)   // OFF 400ms (MEDIO)
+        timings.add(START_MARKER_ON_2)  // ON 800ms (LARGO)
+        timings.add(START_MARKER_OFF_2) // OFF 800ms (separación antes del mensaje)
         
         // ========== MENSAJE MORSE ==========
         val upperText = text.uppercase(locale)
@@ -179,18 +187,18 @@ class MorseEncoder(private val locale: Locale = Locale.getDefault()) {
 
                 // ON duration
                 if (symbol == '.') {
-                    timings.add(DOT_DURATION) // 150ms
+                    timings.add(DOT_DURATION) // 200ms (6 frames @ 30fps)
                 } else {
-                    timings.add(DASH_DURATION) // 400ms
+                    timings.add(DASH_DURATION) // 600ms (18 frames @ 30fps)
                 }
 
                 // OFF duration
                 if (j < code.length - 1) {
                     // Entre símbolos de la misma letra
-                    timings.add(SYMBOL_SPACE) // 150ms
+                    timings.add(SYMBOL_SPACE) // 200ms
                 } else {
                     // Fin de letra
-                    timings.add(LETTER_SPACE) // 500ms
+                    timings.add(LETTER_SPACE) // 600ms
                 }
             }
         }
@@ -198,9 +206,9 @@ class MorseEncoder(private val locale: Locale = Locale.getDefault()) {
         // ========== MARCADOR DE FIN ==========
         // Reemplazar el último OFF por END_MARKER_OFF
         if (timings.isNotEmpty()) {
-            timings[timings.lastIndex] = END_MARKER_OFF // OFF 600ms
+            timings[timings.lastIndex] = END_MARKER_OFF // OFF 1000ms
         }
-        timings.add(END_MARKER_ON) // ON 100ms (pulso final corto)
+        timings.add(END_MARKER_ON) // ON 200ms (1 DOT)
         
         return timings
     }

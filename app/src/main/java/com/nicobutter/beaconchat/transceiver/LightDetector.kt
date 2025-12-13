@@ -19,6 +19,24 @@ class LightDetector(private val onLightStateChanged: (Boolean) -> Unit) : ImageA
     private val history = ArrayDeque<Int>()
     // Reduce history size so threshold adapts faster to changing light conditions
     private val historySize = 8
+    
+    // HYSTERESIS: State confirmation buffer
+    // Require 2 consecutive frames with same state to confirm change
+    // Prevents flickering from single-frame noise
+    private var stateConfirmationBuffer = ArrayDeque<Boolean>()
+    private val confirmationFrames = 2
+    
+    // EDGE DETECTION: Track rapid brightness changes
+    // Fast transitions indicate real LED state change, not gradual ambient changes
+    private var lastBrightness = 0
+    
+    // AMPLITUDE FILTERING: Reject weak pulses from fading light
+    // Camera sensor persistence creates ghost signals - filter by amplitude
+    private val minimumPeakAmplitude = 60 // Minimum brightness difference to accept as valid pulse
+    
+    // FADING DETECTION: Track gradual brightness decay
+    // LED turns off instantly, but camera sees fading - detect and force OFF
+    private var brightnessDecayRate = 0
 
     /**
      * Analyzes a camera image frame for brightness changes.
@@ -77,17 +95,67 @@ class LightDetector(private val onLightStateChanged: (Boolean) -> Unit) : ImageA
         val min = history.minOrNull() ?: 0
         val max = history.maxOrNull() ?: 255
 
-        // If dynamic range is small, assume noise. If significant, set threshold in the middle.
-        // With smaller history, accept a slightly smaller required range.
-        if (max - min > 15) {
-            threshold = (max + min) / 2
+        // AMPLITUDE FILTERING: Calculate signal amplitude
+        val amplitude = max - min
+        val hasValidAmplitude = amplitude >= minimumPeakAmplitude
+
+        // AGGRESSIVE THRESHOLD: Use 60% of range instead of 50% to reject weak signals
+        // If dynamic range is small, assume noise. If significant, set threshold higher.
+        if (amplitude > 15) {
+            threshold = min + (amplitude * 0.6).toInt()  // 60% threshold instead of 50%
+        }
+        
+        // EDGE DETECTION: Calculate brightness change rate
+        val brightnessDelta = average.toInt() - lastBrightness
+        
+        // FADING DETECTION: Track gradual decay
+        brightnessDecayRate = if (brightnessDelta < 0) brightnessDelta else 0
+        val isFading = brightnessDecayRate < -5 && average < threshold
+        
+        lastBrightness = average.toInt()
+        
+        // Determine potential new state with edge detection optimization
+        val potentialNewState = when {
+            // FADING LIGHT: Force OFF if gradual decay detected
+            isFading -> false
+            
+            // AMPLITUDE FILTER: Reject if signal too weak (likely ghost from camera lag)
+            !hasValidAmplitude && amplitude > 0 -> lastState // Keep current state if amplitude too weak
+            
+            // EDGE DETECTION: Fast confirm ON if sharp brightness increase
+            brightnessDelta > 40 -> true
+            
+            // EDGE DETECTION: Fast confirm OFF if sharp brightness decrease  
+            brightnessDelta < -20 -> false
+            
+            // NORMAL: Standard threshold comparison
+            else -> average > threshold
         }
 
-        val newState = average > threshold
+        // HYSTERESIS: Confirm state change with buffer
+        stateConfirmationBuffer.addLast(potentialNewState)
+        if (stateConfirmationBuffer.size > confirmationFrames) {
+            stateConfirmationBuffer.removeFirst()
+        }
+        
+        // Only change state if all recent frames agree (hysteresis)
+        // OR if edge detection detected sharp transition
+        val shouldChangeState = when {
+            // Fast path: Sharp edge detected
+            brightnessDelta > 40 || brightnessDelta < -20 -> potentialNewState != lastState
+            
+            // Normal path: Require confirmation frames
+            stateConfirmationBuffer.size == confirmationFrames -> {
+                val allAgree = stateConfirmationBuffer.all { it == potentialNewState }
+                allAgree && potentialNewState != lastState
+            }
+            
+            else -> false
+        }
 
-        if (newState != lastState) {
-            lastState = newState
-            onLightStateChanged(newState)
+        if (shouldChangeState) {
+            lastState = potentialNewState
+            onLightStateChanged(potentialNewState)
         }
 
         image.close()

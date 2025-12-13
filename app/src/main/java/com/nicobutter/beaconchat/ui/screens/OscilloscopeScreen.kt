@@ -5,6 +5,9 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import android.hardware.camera2.CaptureRequest
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -304,6 +307,7 @@ private fun SignalGraph(
     }
 }
 
+@OptIn(ExperimentalCamera2Interop::class)
 @Composable
 private fun CameraPreview(
     oscilloscope: OpticalOscilloscope,
@@ -326,10 +330,51 @@ private fun CameraPreview(
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
                 
-                // Configuración estándar sin filtros
-                val imageAnalysis = ImageAnalysis.Builder()
+                // CONFIGURACIÓN MANUAL PARA DETECCIÓN PRECISA DE LUZ
+                val imageAnalysisBuilder = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
+                
+                val camera2Interop = Camera2Interop.Extender(imageAnalysisBuilder)
+                
+                // 1. Tiempo de exposición CORTO (8ms = 1/120s)
+                camera2Interop.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_OFF
+                )
+                camera2Interop.setCaptureRequestOption(
+                    CaptureRequest.SENSOR_EXPOSURE_TIME,
+                    8_000_000L  // 8ms
+                )
+                
+                // 2. ISO fijo para menos ruido
+                camera2Interop.setCaptureRequestOption(
+                    CaptureRequest.SENSOR_SENSITIVITY,
+                    400  // ISO 400
+                )
+                
+                // 3. Focus fijo en infinito
+                camera2Interop.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_OFF
+                )
+                camera2Interop.setCaptureRequestOption(
+                    CaptureRequest.LENS_FOCUS_DISTANCE,
+                    0.0f
+                )
+                
+                // 4. White balance fijo
+                camera2Interop.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_OFF
+                )
+                
+                // 5. Frame rate fijo 30fps
+                camera2Interop.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                    android.util.Range(30, 30)
+                )
+                
+                val imageAnalysis = imageAnalysisBuilder.build()
                     .also {
                         it.setAnalyzer(Executors.newSingleThreadExecutor(), oscilloscope)
                     }

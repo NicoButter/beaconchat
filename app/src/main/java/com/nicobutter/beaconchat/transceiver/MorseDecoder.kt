@@ -21,16 +21,18 @@ class MorseDecoder {
     private var currentMessage = StringBuilder()
     private var currentSymbol = StringBuilder() // . or -
 
-    // Standard timings (approximate, will need tolerance)
-    // Reduced DOT_DURATION to match encoder change (120ms) for faster, reliable transmission
-    private val DOT_DURATION = 120L
-    private val DASH_DURATION = DOT_DURATION * 3
-    private val SYMBOL_SPACE = DOT_DURATION
-    private val LETTER_SPACE = DOT_DURATION * 3
-    private val WORD_SPACE = DOT_DURATION * 7
+    // Standard timings synchronized with MorseEncoder
+    // Optimizado para cámaras a 30fps (33ms/frame)
+    // Basado en IEEE 802.15.7 y ITU-R M.1677
+    private val DOT_DURATION = 200L      // 1 unidad (6 frames @ 30fps)
+    private val DASH_DURATION = 600L     // 3 unidades (18 frames @ 30fps)
+    private val SYMBOL_SPACE = 200L      // 1 unidad - entre . y - de una letra
+    private val LETTER_SPACE = 600L      // 3 unidades - entre letras
+    private val WORD_SPACE = 1400L       // 7 unidades - entre palabras
 
-    // Tolerance around measured durations. Reduced to accommodate the shorter DOT.
-    private val tolerance = 60L // +/- 60ms
+    // Tolerancia amplia para compensar variaciones de frame rate
+    // A 30fps, cada frame = 33ms, permitimos ±3 frames = ±100ms
+    private val tolerance = 100L // +/- 100ms
 
     private val morseCodeMapReverse =
             mapOf(
