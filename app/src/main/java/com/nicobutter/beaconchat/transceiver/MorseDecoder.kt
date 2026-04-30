@@ -12,18 +12,18 @@ import androidx.compose.runtime.setValue
  * - isLightOn: NUEVO estado (true=acaba de encenderse, false=acaba de apagarse)
  * - durationMs: duración del estado que ACABA DE TERMINAR
  * 
- * Rangos de clasificación (±50ms para DOT, ±150ms para DASH):
- * - DOT: 150-250ms (nominal 200ms)
- * - DASH: 450-750ms (nominal 600ms)
- * - Symbol gap: 150-250ms (nominal 200ms)
- * - Letter gap: 450-750ms (nominal 600ms)
- * - Word gap: 1200-1600ms (nominal 1400ms)
- * 
- * Preamble (±100ms):
- * - ON_1: 700-900ms (nominal 800ms)
- * - OFF_1: 300-500ms (nominal 400ms)
- * - ON_2: 700-900ms (nominal 800ms)
- * - OFF_2: 700-900ms (nominal 800ms)
+ * Rangos de clasificación (±25% tolerancia):
+ * - DOT: 100-225ms (nominal 150ms)
+ * - DASH: 300-500ms (nominal 400ms)
+ * - Symbol gap: 100-225ms (nominal 150ms)
+ * - Letter gap: 375-625ms (nominal 500ms)
+ * - Word gap: 750-1250ms (nominal 1000ms)
+ *
+ * Preamble (±25% tolerancia):
+ * - ON_1:  200-400ms  (nominal 300ms)
+ * - OFF_1: 200-400ms  (nominal 300ms)
+ * - ON_2:  675-1125ms (nominal 900ms)
+ * - OFF_2: 375-625ms  (nominal 500ms)
  */
 class MorseDecoder {
 
@@ -34,31 +34,31 @@ class MorseDecoder {
     private var currentSymbol = StringBuilder()
     private var messageStarted = false
 
-    // === MORSE TIMING RANGES (ms) ===
+    // === MORSE TIMING RANGES (ms) — ±25% tolerancia sobre valores nominales de MorseEncoder ===
     private companion object {
         // ON durations (símbolos)
-        const val DOT_MIN = 150L
-        const val DOT_MAX = 250L
-        const val DASH_MIN = 450L
-        const val DASH_MAX = 750L
-        
+        const val DOT_MIN  = 100L   // nominal 150ms  → 100-225ms
+        const val DOT_MAX  = 225L
+        const val DASH_MIN = 300L   // nominal 400ms  → 300-500ms
+        const val DASH_MAX = 500L
+
         // OFF durations (gaps)
-        const val SYMBOL_SPACE_MIN = 150L
-        const val SYMBOL_SPACE_MAX = 250L
-        const val LETTER_SPACE_MIN = 450L
-        const val LETTER_SPACE_MAX = 750L
-        const val WORD_SPACE_MIN = 1200L
-        const val WORD_SPACE_MAX = 1600L
-        
-        // === PREAMBLE RANGES (ms) ===
-        const val PREAMBLE_ON_1_MIN = 700L
-        const val PREAMBLE_ON_1_MAX = 900L
-        const val PREAMBLE_OFF_1_MIN = 300L
-        const val PREAMBLE_OFF_1_MAX = 500L
-        const val PREAMBLE_ON_2_MIN = 700L
-        const val PREAMBLE_ON_2_MAX = 900L
-        const val PREAMBLE_OFF_2_MIN = 700L
-        const val PREAMBLE_OFF_2_MAX = 900L
+        const val SYMBOL_SPACE_MIN = 100L   // nominal 150ms  → 100-225ms
+        const val SYMBOL_SPACE_MAX = 225L
+        const val LETTER_SPACE_MIN = 375L   // nominal 500ms  → 375-625ms
+        const val LETTER_SPACE_MAX = 625L
+        const val WORD_SPACE_MIN   = 750L   // nominal 1000ms → 750-1250ms
+        const val WORD_SPACE_MAX   = 1250L
+
+        // === PREAMBLE RANGES (ms) — protocolo: ON 300 → OFF 300 → ON 900 → OFF 500 ===
+        const val PREAMBLE_ON_1_MIN  = 200L   // nominal 300ms  → 200-400ms
+        const val PREAMBLE_ON_1_MAX  = 400L
+        const val PREAMBLE_OFF_1_MIN = 200L   // nominal 300ms  → 200-400ms
+        const val PREAMBLE_OFF_1_MAX = 400L
+        const val PREAMBLE_ON_2_MIN  = 675L   // nominal 900ms  → 675-1125ms
+        const val PREAMBLE_ON_2_MAX  = 1125L
+        const val PREAMBLE_OFF_2_MIN = 375L   // nominal 500ms  → 375-625ms
+        const val PREAMBLE_OFF_2_MAX = 625L
     }
     
     private var preambleStage = 0  // 0=waiting ON_1, 1=got ON_1 waiting OFF_1, 2=got OFF_1 waiting ON_2, 3=got ON_2 waiting OFF_2
@@ -124,16 +124,16 @@ class MorseDecoder {
                     // Cuando se APAGA después del primer ON
                     if (!isLightOn && inRange(durationMs, PREAMBLE_ON_1_MIN, PREAMBLE_ON_1_MAX)) {
                         preambleStage = 1
-                        Log.w("MorseDecoder", "[1/4] ✓ ON_1 = ${durationMs}ms (esperado 700-900ms)")
+                        Log.w("MorseDecoder", "[1/4] ✓ ON_1 = ${durationMs}ms (esperado 200-400ms)")
                     } else if (!isLightOn) {
-                        Log.d("MorseDecoder", "[1/4] ✗ ON duró ${durationMs}ms (esperado 700-900ms)")
+                        Log.d("MorseDecoder", "[1/4] ✗ ON duró ${durationMs}ms (esperado 200-400ms)")
                     }
                 }
                 1 -> { // Esperando OFF_1 (400ms)
                     // Cuando se ENCIENDE después del primer OFF
                     if (isLightOn && inRange(durationMs, PREAMBLE_OFF_1_MIN, PREAMBLE_OFF_1_MAX)) {
                         preambleStage = 2
-                        Log.w("MorseDecoder", "[2/4] ✓ OFF_1 = ${durationMs}ms (esperado 300-500ms)")
+                        Log.w("MorseDecoder", "[2/4] ✓ OFF_1 = ${durationMs}ms (esperado 200-400ms)")
                     } else if (isLightOn) {
                         Log.d("MorseDecoder", "[2/4] ✗ OFF duró ${durationMs}ms, RESET")
                         preambleStage = 0
@@ -143,7 +143,7 @@ class MorseDecoder {
                     // Cuando se APAGA después del segundo ON
                     if (!isLightOn && inRange(durationMs, PREAMBLE_ON_2_MIN, PREAMBLE_ON_2_MAX)) {
                         preambleStage = 3
-                        Log.w("MorseDecoder", "[3/4] ✓ ON_2 = ${durationMs}ms (esperado 700-900ms)")
+                        Log.w("MorseDecoder", "[3/4] ✓ ON_2 = ${durationMs}ms (esperado 675-1125ms)")
                     } else if (!isLightOn) {
                         Log.d("MorseDecoder", "[3/4] ✗ ON duró ${durationMs}ms, RESET")
                         preambleStage = 0
@@ -156,7 +156,7 @@ class MorseDecoder {
                         preambleStage = 0
                         Log.w("MorseDecoder", "[4/4] ✓ OFF_2 = ${durationMs}ms → 🎉 PREAMBLE COMPLETO! Decodificando mensaje...")
                     } else if (isLightOn) {
-                        Log.d("MorseDecoder", "[4/4] ✗ OFF duró ${durationMs}ms, RESET")
+                        Log.d("MorseDecoder", "[4/4] ✗ OFF duró ${durationMs}ms (esperado 375-625ms), RESET")
                         preambleStage = 0
                     }
                 }
@@ -187,7 +187,7 @@ class MorseDecoder {
                 currentSymbol.append("-")
                 Log.w("MorseDecoder", "━ DASH (${durationMs}ms) → símbolo actual: $currentSymbol")
             }
-            else -> Log.d("MorseDecoder", "⚠ ON=${durationMs}ms fuera de rango (esperado DOT 150-250 o DASH 450-750)")
+            else -> Log.d("MorseDecoder", "⚠ ON=${durationMs}ms fuera de rango (esperado DOT 100-225 o DASH 300-500)")
         }
     }
 
@@ -209,7 +209,7 @@ class MorseDecoder {
                 decodedMessage = currentMessage.toString()
                 Log.w("MorseDecoder", "📝 Mensaje: '$decodedMessage'")
             }
-            else -> Log.d("MorseDecoder", "⚠ OFF=${durationMs}ms fuera de rango (esperado 150-250, 450-750 o 1200-1600)")
+            else -> Log.d("MorseDecoder", "⚠ OFF=${durationMs}ms fuera de rango (esperado 100-225, 375-625 o 750-1250)")
         }
     }
 

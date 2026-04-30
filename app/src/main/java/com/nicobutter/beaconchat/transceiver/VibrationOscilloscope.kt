@@ -141,115 +141,65 @@ class VibrationOscilloscope(
     }
     
     /**
-     * Detector de pulsos Morse en señal de vibración
-     * Similar al detector de OpticalOscilloscope pero adaptado para vibración
+     * Detector de pulsos Morse en señal de vibración.
+     *
+     * Detecta transiciones ON/OFF en la magnitud normalizada y delega la
+     * decodificación Morse completa (incluyendo preámbulo) a [MorseDecoder].
+     * Cada vez que la señal cruza el umbral dinámico se notifica al
+     * decodificador con la duración del estado que acaba de terminar.
      */
     private inner class PulseDetector(private val locale: Locale) {
-        // Decodificador Morse simple (sin multi-idioma por ahora)
+
         private val morseDecoder = MorseDecoder()
-        
-        // Umbral dinámico para detección ON/OFF
-        private val thresholdFactor = 0.4f // 40% del rango dinámico
-        
-        // Estado de detección
+        private val thresholdFactor = 0.4f
+
         private var isVibrating = false
-        private var pulseStartTime = 0L
-        private var lastTransitionTime = 0L
-        
-        // Contador de pulsos
+        private var pulseStartTime = 0L   // marca de tiempo al inicio del ON
+        private var silenceStartTime = 0L // marca de tiempo al inicio del OFF
         private var pulseCount = 0
-        
-        // Buffer de símbolos Morse detectados
-        private val morseBuffer = StringBuilder()
-        
-        // Mensaje decodificado
-        private var decodedText = ""
-        
+
         fun processSample(magnitude: Float, timestamp: Long) {
-            // Calcular umbral dinámico
             val stats = vibrationDetector?.getStats() ?: return
-            val threshold = stats.min + (stats.max - stats.min) * thresholdFactor
-            
+            val range = stats.max - stats.min
+            // No hay señal suficiente todavía
+            if (range < 0.05f) return
+
+            val threshold = stats.min + range * thresholdFactor
             val isAboveThreshold = magnitude > threshold
-            
-            // Detectar transiciones ON/OFF
+
             if (isAboveThreshold && !isVibrating) {
-                // Inicio de pulso (OFF → ON)
-                handlePulseStart(timestamp)
+                // Transición OFF → ON: notificar duración del silencio previo
+                isVibrating = true
+                val offDuration = if (silenceStartTime > 0L) timestamp - silenceStartTime else 0L
+                if (silenceStartTime > 0L) {
+                    // isLightOn=true  ← nuevo estado; offDuration ← estado que terminó
+                    morseDecoder.onLightStateChanged(true, offDuration)
+                }
+                pulseStartTime = timestamp
+
             } else if (!isAboveThreshold && isVibrating) {
-                // Fin de pulso (ON → OFF)
-                handlePulseEnd(timestamp)
-            }
-            
-            // Detectar timeouts (silencio prolongado)
-            if (!isVibrating && lastTransitionTime > 0) {
-                val silenceDuration = timestamp - lastTransitionTime
-                
-                if (silenceDuration > GAP_MIN_DURATION && morseBuffer.isNotEmpty()) {
-                    // GAP entre letras → decodificar letra
-                    decodeLetter()
-                }
-                
-                if (silenceDuration > WORD_GAP_DURATION) {
-                    // GAP entre palabras → agregar espacio
-                    if (decodedText.isNotEmpty() && !decodedText.endsWith(" ")) {
-                        decodedText += " "
-                    }
-                }
-            }
-        }
-        
-        private fun handlePulseStart(timestamp: Long) {
-            isVibrating = true
-            pulseStartTime = timestamp
-            lastTransitionTime = timestamp
-        }
-        
-        private fun handlePulseEnd(timestamp: Long) {
-            isVibrating = false
-            val pulseDuration = timestamp - pulseStartTime
-            lastTransitionTime = timestamp
-            
-            // Clasificar pulso por duración
-            when {
-                pulseDuration < MIN_PULSE_DURATION -> {
-                    // Ruido - ignorar
-                }
-                pulseDuration < DOT_MAX_DURATION -> {
-                    // DOT detectado
-                    morseBuffer.append('.')
+                // Transición ON → OFF: notificar duración del pulso previo
+                isVibrating = false
+                val onDuration = timestamp - pulseStartTime
+                silenceStartTime = timestamp
+                if (onDuration >= MIN_PULSE_DURATION) {
+                    // isLightOn=false ← nuevo estado; onDuration ← estado que terminó
+                    morseDecoder.onLightStateChanged(false, onDuration)
                     pulseCount++
                 }
-                pulseDuration < DASH_MAX_DURATION -> {
-                    // DASH detectado
-                    morseBuffer.append('-')
-                    pulseCount++
-                }
-                else -> {
-                    // Pulso muy largo - posible marcador o error
-                    // Por ahora ignorar
-                }
             }
         }
-        
-        private fun decodeLetter() {
-            val morseCode = morseBuffer.toString()
-            // Por ahora usar el mensaje decodificado del MorseDecoder estándar
-            // En futuro se puede adaptar para multi-idioma
-            morseBuffer.clear()
-        }
-        
-        fun getDecodedMessage(): String = decodedText
-        
+
+        fun getDecodedMessage(): String = morseDecoder.decodedMessage
+
         fun getPulseCount(): Int = pulseCount
-        
+
         fun reset() {
             isVibrating = false
             pulseStartTime = 0L
-            lastTransitionTime = 0L
+            silenceStartTime = 0L
             pulseCount = 0
-            morseBuffer.clear()
-            decodedText = ""
+            morseDecoder.reset()
         }
     }
 }
