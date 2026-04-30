@@ -117,6 +117,12 @@ fun TransmitterScreen(
         transmissionJob?.cancel()
         transmissionJob = null
         isTransmitting = false
+        // Release the flashlight/vibration/sound immediately, don't wait for coroutine cleanup
+        when (selectedMethod) {
+            TransmissionMethod.FLASHLIGHT -> flashlightController.stop()
+            TransmissionMethod.VIBRATION -> vibrationController.cleanup()
+            TransmissionMethod.SOUND -> soundController.cleanup()
+        }
     }
 
     fun sendOnce(message: String) {

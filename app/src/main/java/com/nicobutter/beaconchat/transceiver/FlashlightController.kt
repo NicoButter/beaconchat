@@ -4,6 +4,8 @@ import android.content.Context
 import android.hardware.camera2.CameraManager
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -22,6 +24,8 @@ class FlashlightController(context: Context) {
     private val transmissionMutex = Mutex()
     private var isFlashlightOn = false
     @Volatile private var isStopped = false
+    /** Job of the currently running transmit() coroutine. Cancelled by stop()/cleanup(). */
+    @Volatile private var activeTransmissionJob: Job? = null
 
     /** Callback for visual debugging of transmission state. */
     var onStateChange: ((Boolean, Int, Int) -> Unit)? = null
@@ -61,6 +65,9 @@ class FlashlightController(context: Context) {
         // Prevent concurrent transmissions
         transmissionMutex.withLock {
             Log.d(TAG, "Starting transmission with ${timings.size} timings")
+
+            // Store the calling coroutine's Job so stop()/cleanup() can cancel it immediately
+            activeTransmissionJob = currentCoroutineContext()[Job]
 
             // Reset stop flag
             isStopped = false
@@ -107,6 +114,7 @@ class FlashlightController(context: Context) {
                     Log.d(TAG, "Transmission complete, ensuring flashlight is off")
                     ensureFlashlightOff(id)
                     onStateChange?.invoke(false, timings.size, timings.size)
+                    activeTransmissionJob = null
                     isStopped = false // Reset flag
                 }
             }
@@ -165,7 +173,9 @@ class FlashlightController(context: Context) {
      */
     fun stop() {
         isStopped = true
-        // Immediately turn off flashlight
+        // Cancel the active coroutine so the mutex is released immediately
+        activeTransmissionJob?.cancel()
+        // Also turn off at the hardware level right away
         cameraId?.let { id ->
             try {
                 ensureFlashlightOff(id)
@@ -183,8 +193,9 @@ class FlashlightController(context: Context) {
      * remaining on.
      */
     fun cleanup() {
-        // Set stop flag to interrupt any ongoing transmission
+        // Cancel the active coroutine first so the mutex is released immediately
         isStopped = true
+        activeTransmissionJob?.cancel()
         cameraId?.let { id ->
             try {
                 ensureFlashlightOff(id)
@@ -193,6 +204,7 @@ class FlashlightController(context: Context) {
                 Log.e(TAG, "Error during cleanup", e)
             }
         }
+        onStateChange = null
     }
 
     companion object {
