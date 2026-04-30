@@ -119,11 +119,11 @@ class LightScanner : ImageAnalysis.Analyzer {
      * Processes a camera frame to detect light signals and update analysis state.
      *
      * This method is called by CameraX for each frame. It performs the following operations:
-     * 1. Throttles processing to ~15 FPS for optimal performance
+     * 1. Throttles processing to ~20 FPS for optimal performance/latency balance
      * 2. Extracts luminance data from the YUV image
      * 3. Updates intensity buffer for oscilloscope display
      * 4. Detects peaks and valleys in the signal
-     * 5. Finds brightest regions for flash position detection
+     * 5. Finds brightest regions for flash position detection using multi-sector analysis
      * 6. Detects flash events and recognizes heartbeat patterns
      * 7. Updates signal statistics
      *
@@ -133,8 +133,9 @@ class LightScanner : ImageAnalysis.Analyzer {
         try {
             val currentTime = System.currentTimeMillis()
             
-            // Skip frames if processing is too slow (throttle to max 15 FPS for better detection)
-            if (currentTime - lastFrameTime < 66) { // ~15 FPS
+            // Skip frames to maintain ~20 FPS (50ms interval)
+            // Faster than 15fps to capture short blinks better
+            if (currentTime - lastFrameTime < 45) { 
                 image.close()
                 return
             }
@@ -146,41 +147,43 @@ class LightScanner : ImageAnalysis.Analyzer {
             val width = image.width
             val height = image.height
             val rowStride = image.planes[0].rowStride
+
+            // 1. Find brightest region (Multi-sector analysis)
+            // We use this to identify WHERE the potential transmitter is
+            val (flashX, flashY, sectorAvg) = findBrightestRegionWithIntensity(data, width, height, rowStride)
             
-            // Calculate average brightness (with aggressive sampling for performance)
-            val avgBrightness = calculateAverageBrightness(data)
+            // 2. Localized Intensity: use the brightness of the target region instead of global average
+            // This isolates the signal from background light changes
+            val currentIntensity = sectorAvg 
             
             // Add to oscilloscope buffer
             val intensityPoint = IntensityPoint(
                 timestamp = currentTime,
-                intensity = avgBrightness
+                intensity = currentIntensity
             )
             intensityBuffer.addLast(intensityPoint)
             if (intensityBuffer.size > OSCILLOSCOPE_BUFFER_SIZE) {
                 intensityBuffer.removeFirst()
             }
             
+            // Update StateFlow for the mini-oscilloscope
+            _signalData.value = intensityBuffer.toList()
+            
             // Detect peaks and valleys in the oscilloscope buffer
             if (intensityBuffer.size >= 5) {
                 markPeaksAndValleys()
             }
             
-            // Update StateFlow for the mini-oscilloscope
-            _signalData.value = intensityBuffer.toList()
-            
             // Calculate center brightness (for reference)
             val centerBrightness = calculateCenterBrightness(data, width, height, rowStride)
-            
-            // Detect position of brightest point (possible flash)
-            val flashPosition = findBrightestRegion(data, width, height, rowStride)
             
             // Add frame to history
             val frame = BrightnessFrame(
                 timestamp = currentTime,
-                avgBrightness = avgBrightness,
+                avgBrightness = currentIntensity, // Using localized intensity
                 centerBrightness = centerBrightness,
-                flashPositionX = flashPosition.first,
-                flashPositionY = flashPosition.second
+                flashPositionX = flashX,
+                flashPositionY = flashY
             )
             
             brightnessHistory.addLast(frame)
@@ -193,8 +196,8 @@ class LightScanner : ImageAnalysis.Analyzer {
                 detectFlashes()
             }
             
-            // Try to recognize patterns (heartbeats) - only every 5 frames
-            if (brightnessHistory.size % 5 == 0) {
+            // Try to recognize patterns (heartbeats) - every 3 frames for faster feedback
+            if (frameCount % 3 == 0) {
                 recognizePatterns()
             }
             
@@ -202,12 +205,64 @@ class LightScanner : ImageAnalysis.Analyzer {
             updateSignalStats(currentTime)
             
             lastFrameTime = currentTime
+            frameCount++
             
         } catch (e: Exception) {
             Log.e(TAG, "Error analyzing frame", e)
         } finally {
             image.close()
         }
+    }
+
+    /**
+     * Finds the brightest sector in the frame and returns its position and average brightness.
+     * Use this to isolate the light source from global background noise.
+     */
+    private fun findBrightestRegionWithIntensity(
+        data: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int
+    ): Triple<Float, Float, Int> {
+        val gridSize = 4 // 4x4 grid for better localization
+        val cellWidth = width / gridSize
+        val cellHeight = height / gridSize
+        
+        var maxAvg = 0
+        var bestX = 0.5f
+        var bestY = 0.5f
+        
+        for (gy in 0 until gridSize) {
+            for (gx in 0 until gridSize) {
+                var sum = 0L
+                var count = 0
+                
+                val startX = gx * cellWidth
+                val startY = gy * cellHeight
+                val endX = minOf(startX + cellWidth, width)
+                val endY = minOf(startY + cellHeight, height)
+                
+                // Sample pixels in this sector
+                for (y in startY until endY step 15) {
+                    for (x in startX until endX step 15) {
+                        val index = y * rowStride + x
+                        if (index < data.size) {
+                            sum += (data[index].toInt() and 0xFF)
+                            count++
+                        }
+                    }
+                }
+                
+                val avg = if (count > 0) (sum / count).toInt() else 0
+                if (avg > maxAvg) {
+                    maxAvg = avg
+                    bestX = (gx + 0.5f) / gridSize
+                    bestY = (gy + 0.5f) / gridSize
+                }
+            }
+        }
+        
+        return Triple(bestX, bestY, maxAvg)
     }
     
     /**
@@ -374,14 +429,17 @@ class LightScanner : ImageAnalysis.Analyzer {
         
         val latest = brightnessHistory.last()
         
-        // Calculate average of last 4 frames (excluding current)
-        val recentFrames = brightnessHistory.takeLast(5).dropLast(1)
-        val avgRecent = recentFrames.map { it.avgBrightness }.average().toInt()
+        // Use a Hysteresis-like approach for Radar flashes too
+        // Compare current localized intensity against the recent background floor (P10)
+        val sortedRecent = brightnessHistory.map { it.avgBrightness }.sorted()
+        val floor = sortedRecent[0] // Min in recent history
+        val ceiling = sortedRecent.last()
+        val range = ceiling - floor
+
+        // Sudden jump detection
+        val spike = latest.avgBrightness - floor
         
-        // Detect sudden increase compared to recent average (reduces noise)
-        val increase = latest.avgBrightness - avgRecent
-        
-        if (increase > FLASH_THRESHOLD) {
+        if (spike > FLASH_THRESHOLD && range > FLASH_THRESHOLD) {
             val flashEvent = FlashEvent(
                 timestamp = latest.timestamp,
                 intensity = latest.avgBrightness,
@@ -389,9 +447,12 @@ class LightScanner : ImageAnalysis.Analyzer {
                 positionY = latest.flashPositionY
             )
             
-            patternBuffer.add(flashEvent)
-            
-            Log.d(TAG, "Flash detected! Intensity: ${latest.avgBrightness} (avg recent: $avgRecent), Position: (${latest.flashPositionX}, ${latest.flashPositionY})")
+            // Avoid duplicates (if the flash lasts more than one frame)
+            val lastEvent = patternBuffer.lastOrNull()
+            if (lastEvent == null || (latest.timestamp - lastEvent.timestamp > 100)) {
+                patternBuffer.add(flashEvent)
+                Log.d(TAG, "Flash detected! Intensity spike: $spike, Pos: (${latest.flashPositionX}, ${latest.flashPositionY})")
+            }
             
             // Clean old buffer (keep only last 5 seconds)
             val cutoff = System.currentTimeMillis() - 5000

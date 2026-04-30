@@ -98,9 +98,12 @@ class OpticalOscilloscope : ImageAnalysis.Analyzer {
     // Circular buffer of intensities (last N frames)
     private val intensityBuffer = ArrayDeque<IntensityPoint>(BUFFER_SIZE)
     
-    // Filtro suavizado para estabilizar la señal
+    // Filtro suavizado para estabilizar la señal (Reducido para mayor nitidez en Morse)
     private var previousBrightness = 0
-    private val SMOOTHING_FACTOR = 0.7f // 70% del valor anterior, 30% del actual
+    private val SMOOTHING_FACTOR = 0.2f // 20% del anterior, 80% del actual (Más reactivo)
+    
+    // Histéresis para evitar jitter en las transiciones
+    private var lastPulseState = false // false = OFF, true = ON
     
     // StateFlow for the UI
     private val _signalData = MutableStateFlow<List<IntensityPoint>>(emptyList())
@@ -468,9 +471,9 @@ class PulseDetector {
     /**
      * Analyzes a signal curve to detect Morse code pulses.
      *
-     * Uses dynamic thresholding based on recent intensity history to identify
-     * transitions between light and dark states. Filters out noise by ignoring
-     * very short pulses.
+     * Uses a Hysteresis trigger (Schmidt Trigger logic) with dynamic boundaries
+     * based on recent signal percentiles. This provides much cleaner pulses
+     * than simple thresholding.
      *
      * @param signal List of intensity points representing the signal curve
      * @return List of detected pulses with timing and type information
@@ -478,7 +481,7 @@ class PulseDetector {
     fun detectPulses(signal: List<OpticalOscilloscope.IntensityPoint>): List<Pulse> {
         val pulses = mutableListOf<Pulse>()
         
-        // Update intensity history for dynamic threshold
+        // Update intensity history
         signal.forEach { point ->
             intensityHistory.addLast(point.intensity)
             if (intensityHistory.size > historySize) {
@@ -486,43 +489,40 @@ class PulseDetector {
             }
         }
         
-        // Calculate dynamic threshold based on min/max like LightDetector
-        val min = intensityHistory.minOrNull() ?: 0
-        val max = intensityHistory.maxOrNull() ?: 255
-        
-        // Umbral ajustado para mejor detección
-        // Si hay buen rango dinámico (>30), usar punto medio ligeramente hacia abajo
-        // para capturar mejor las transiciones ON
-        val threshold = if (max - min > 30) {
-            min + ((max - min) * 0.4).toInt() // 40% del rango desde el mínimo
-        } else {
-            val avg = intensityHistory.average().toInt()
-            avg + 5 // Umbral más bajo para señales débiles
-        }
+        if (intensityHistory.size < 5) return pulses
+
+        // Calculate dynamic boundaries using a simplified percentile-like approach
+        val sortedHistory = intensityHistory.sorted()
+        val p10 = sortedHistory[(sortedHistory.size * 0.1).toInt()] // Background noise
+        val p90 = sortedHistory[(sortedHistory.size * 0.9).toInt()] // Signal peak
+        val range = p90 - p10
+
+        // Only process if we have a significant signal (range > 15)
+        if (range < 15) return pulses
+
+        // Hysteresis thresholds
+        val tOn = p10 + (range * 0.6).toInt()  // Higher threshold to turn ON
+        val tOff = p10 + (range * 0.3).toInt() // Lower threshold to turn OFF
         
         var inPulse = false
         var pulseStart = 0L
         
         for (point in signal) {
-            if (!inPulse && point.intensity > threshold) {
-                // Start of pulse (ON)
+            if (!inPulse && point.intensity > tOn) {
+                // HIGH transition
                 inPulse = true
                 pulseStart = point.timestamp
-            } else if (inPulse && point.intensity < threshold) {
-                // End of pulse (OFF)
+            } else if (inPulse && point.intensity < tOff) {
+                // LOW transition
                 inPulse = false
                 val duration = point.timestamp - pulseStart
                 
-                // Filtrar pulsos muy cortos (ruido) - mínimo 80ms
-                if (duration > 80) {
-                    // Clasificación según protocolo estándar:
-                    // DOT: < 200ms
-                    // DASH: 200-500ms
-                    // Espacios largos: > 500ms (fin de letra/palabra)
+                // Filter noise (minimum duration for a DOT at 20fps is ~50ms)
+                if (duration > 60) {
                     val type = when {
-                        duration < 200 -> PulseType.DOT
-                        duration < 500 -> PulseType.DASH
-                        else -> PulseType.GAP // Espacio largo
+                        duration < 250 -> PulseType.DOT
+                        duration < 600 -> PulseType.DASH
+                        else -> PulseType.GAP
                     }
                     pulses.add(Pulse(pulseStart, point.timestamp, duration, type))
                 }
