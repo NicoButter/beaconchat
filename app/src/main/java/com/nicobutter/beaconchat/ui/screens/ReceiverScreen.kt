@@ -105,33 +105,33 @@ fun ReceiverScreen(
                         if (!isQrMode) {
                             val camera2Interop = Camera2Interop.Extender(imageAnalysisBuilder)
                             
-                            // 1. EXPOSURE TIME: Fijar tiempo de exposición CORTO
-                            // Típico: 1/30s = 33ms (30fps), queremos 1/120s = 8ms para reducir lag
-                            // Valor en nanosegundos: 8ms = 8,000,000ns
+                            // 1. EXPOSURE TIME: Balance entre velocidad y sensibilidad
+                            // Típico: 1/30s = 33ms (30fps), usamos 1/60s = 16ms para captar más luz
+                            // Valor en nanosegundos: 16ms = 16,000,000ns
                             camera2Interop.setCaptureRequestOption(
                                 CaptureRequest.CONTROL_AE_MODE,
                                 CaptureRequest.CONTROL_AE_MODE_OFF  // Deshabilitar auto-exposure
                             )
                             camera2Interop.setCaptureRequestOption(
                                 CaptureRequest.SENSOR_EXPOSURE_TIME,
-                                8_000_000L  // 8ms = 1/120s
+                                16_000_000L  // 16ms = 1/60s - Mayor alcance
                             )
                             
-                            // 2. ISO/SENSITIVITY: Fijar ISO bajo para menos ruido
-                            // ISO 100-200 típico, queremos 400 para balance velocidad/calidad
+                            // 2. ISO/SENSITIVITY: Aumentar sensibilidad para mayor distancia
+                            // ISO más alto = mayor sensibilidad a luz = funciona más lejos
                             camera2Interop.setCaptureRequestOption(
                                 CaptureRequest.SENSOR_SENSITIVITY,
-                                400  // ISO 400
+                                800  // ISO 800 - Mayor alcance
                             )
                             
-                            // 3. FOCUS MODE: Fijar foco en infinito (evitar re-enfoque)
+                            // 3. FOCUS MODE: Fijar foco en distancia media (20cm-2m)
                             camera2Interop.setCaptureRequestOption(
                                 CaptureRequest.CONTROL_AF_MODE,
                                 CaptureRequest.CONTROL_AF_MODE_OFF
                             )
                             camera2Interop.setCaptureRequestOption(
                                 CaptureRequest.LENS_FOCUS_DISTANCE,
-                                0.0f  // 0 = infinito
+                                2.0f  // 2 dioptrías ≈ 50cm foco óptimo
                             )
                             
                             // 4. WHITE BALANCE: Fijar WB para evitar ajustes durante captura
@@ -160,10 +160,12 @@ fun ReceiverScreen(
                         } else {
                                 imageAnalysis.setAnalyzer(
                                         analysisExecutor,
-                                        LightDetector { lightDetected ->
-                                                isLightOn = lightDetected
-                                                morseDecoder.onLightStateChanged(lightDetected)
-                                        }
+                                        LightDetector(
+                                                onLightStateChanged = { lightDetected, durationMs ->
+                                                        isLightOn = lightDetected
+                                                        morseDecoder.onLightStateChanged(lightDetected, durationMs)
+                                                }
+                                        )
                                 )
                         }
 

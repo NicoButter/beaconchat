@@ -94,6 +94,7 @@ fun TransmitterScreen(
                     EncodingType.MORSE -> morseEncoder.encode(message)
                     EncodingType.ASCII_BINARY -> binaryEncoder.encode(message)
                 }
+                android.util.Log.w("TransmitterScreen", "📤 ENCODED MESSAGE '$message' to ${timings.size} timings: $timings")
                 while (isActive && isTransmitting) {
                     try {
                         when (selectedMethod) {

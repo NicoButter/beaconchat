@@ -67,9 +67,10 @@ class FlashlightController(context: Context) {
 
             withContext(Dispatchers.IO) {
                 try {
-                    // Ensure flashlight is off before starting
+                    // Ensure flashlight starts OFF
                     ensureFlashlightOff(id)
-
+                    
+                    Log.w(TAG, "=== TRANSMISSION START: ${timings.size} timings ===")
                     for (i in timings.indices) {
                         if (isStopped) {
                             Log.d(TAG, "Transmission stopped at step $i")
@@ -77,18 +78,25 @@ class FlashlightController(context: Context) {
                         }
 
                         val duration = timings[i]
-                        val isTurnOn = i % 2 == 0 // Even indices are ON, Odd are OFF
-
+                        val isTurnOn = i % 2 == 0
+                        val startTime = System.currentTimeMillis()
+                        
                         if (isTurnOn) {
-                            Log.d(TAG, "[$i/${timings.size}] ON for ${duration}ms")
+                            Log.w(TAG, "[$i] ON for ${duration}ms (expected end: +${duration}ms)")
                             setTorchMode(id, true)
                             onStateChange?.invoke(true, i, timings.size)
                         } else {
-                            Log.d(TAG, "[$i/${timings.size}] OFF for ${duration}ms")
+                            Log.w(TAG, "[$i] OFF for ${duration}ms (expected end: +${duration}ms)")
                             setTorchMode(id, false)
                             onStateChange?.invoke(false, i, timings.size)
                         }
+                        
                         delay(duration)
+                        val actualDuration = System.currentTimeMillis() - startTime
+                        val drift = actualDuration - duration
+                        if (kotlin.math.abs(drift) > 50) {
+                            Log.w(TAG, "⚠ TIMING DRIFT at [$i]: expected ${duration}ms, actual ${actualDuration}ms (drift: ${drift}ms)")
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error during transmission", e)

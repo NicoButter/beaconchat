@@ -1,38 +1,67 @@
 package com.nicobutter.beaconchat.transceiver
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * Decodes Morse code signals from light state changes.
- *
- * This class analyzes sequences of light on/off transitions to decode Morse code
- * messages. It uses timing analysis to distinguish between dots, dashes, and
- * various pause durations that separate symbols, letters, and words.
+ * Decodes Morse code from measured on/off durations (milliseconds).
+ * 
+ * IMPORTANTE: onLightStateChanged recibe:
+ * - isLightOn: NUEVO estado (true=acaba de encenderse, false=acaba de apagarse)
+ * - durationMs: duración del estado que ACABA DE TERMINAR
+ * 
+ * Rangos de clasificación (±50ms para DOT, ±150ms para DASH):
+ * - DOT: 150-250ms (nominal 200ms)
+ * - DASH: 450-750ms (nominal 600ms)
+ * - Symbol gap: 150-250ms (nominal 200ms)
+ * - Letter gap: 450-750ms (nominal 600ms)
+ * - Word gap: 1200-1600ms (nominal 1400ms)
+ * 
+ * Preamble (±100ms):
+ * - ON_1: 700-900ms (nominal 800ms)
+ * - OFF_1: 300-500ms (nominal 400ms)
+ * - ON_2: 700-900ms (nominal 800ms)
+ * - OFF_2: 700-900ms (nominal 800ms)
  */
 class MorseDecoder {
 
-    /** The currently decoded message, updated reactively for UI binding. */
     var decodedMessage by mutableStateOf("")
         private set
 
-    private var lastChangeTime = 0L
     private var currentMessage = StringBuilder()
-    private var currentSymbol = StringBuilder() // . or -
+    private var currentSymbol = StringBuilder()
+    private var messageStarted = false
 
-    // Standard timings synchronized with MorseEncoder
-    // Optimizado para cámaras a 30fps (33ms/frame)
-    // Basado en IEEE 802.15.7 y ITU-R M.1677
-    private val DOT_DURATION = 200L      // 1 unidad (6 frames @ 30fps)
-    private val DASH_DURATION = 600L     // 3 unidades (18 frames @ 30fps)
-    private val SYMBOL_SPACE = 200L      // 1 unidad - entre . y - de una letra
-    private val LETTER_SPACE = 600L      // 3 unidades - entre letras
-    private val WORD_SPACE = 1400L       // 7 unidades - entre palabras
-
-    // Tolerancia amplia para compensar variaciones de frame rate
-    // A 30fps, cada frame = 33ms, permitimos ±3 frames = ±100ms
-    private val tolerance = 100L // +/- 100ms
+    // === MORSE TIMING RANGES (ms) ===
+    private companion object {
+        // ON durations (símbolos)
+        const val DOT_MIN = 150L
+        const val DOT_MAX = 250L
+        const val DASH_MIN = 450L
+        const val DASH_MAX = 750L
+        
+        // OFF durations (gaps)
+        const val SYMBOL_SPACE_MIN = 150L
+        const val SYMBOL_SPACE_MAX = 250L
+        const val LETTER_SPACE_MIN = 450L
+        const val LETTER_SPACE_MAX = 750L
+        const val WORD_SPACE_MIN = 1200L
+        const val WORD_SPACE_MAX = 1600L
+        
+        // === PREAMBLE RANGES (ms) ===
+        const val PREAMBLE_ON_1_MIN = 700L
+        const val PREAMBLE_ON_1_MAX = 900L
+        const val PREAMBLE_OFF_1_MIN = 300L
+        const val PREAMBLE_OFF_1_MAX = 500L
+        const val PREAMBLE_ON_2_MIN = 700L
+        const val PREAMBLE_ON_2_MAX = 900L
+        const val PREAMBLE_OFF_2_MIN = 700L
+        const val PREAMBLE_OFF_2_MAX = 900L
+    }
+    
+    private var preambleStage = 0  // 0=waiting ON_1, 1=got ON_1 waiting OFF_1, 2=got OFF_1 waiting ON_2, 3=got ON_2 waiting OFF_2
 
     private val morseCodeMapReverse =
             mapOf(
@@ -75,110 +104,139 @@ class MorseDecoder {
             )
 
     /**
-     * Processes a light state change event for Morse code decoding.
-     *
-     * Call this method whenever the light detector detects a transition between
-     * light on and light off states. The decoder uses timing analysis to interpret
-     * the Morse code sequence.
-     *
-     * @param isLightOn The current light state (true = on, false = off)
+     * Procesa cambio de estado de luz.
+     * 
+     * IMPORTANTE: 
+     * - isLightOn: NUEVO estado (true=SE ACABA DE ENCENDER, false=SE ACABA DE APAGAR)
+     * - durationMs: duración del estado que ACABA DE TERMINAR
+     * 
+     * Ejemplo:
+     * - LED estaba ON 800ms, luego se apaga → isLightOn=false, durationMs=800
+     * - LED estaba OFF 400ms, luego se enciende → isLightOn=true, durationMs=400
      */
-    fun onLightStateChanged(isLightOn: Boolean) {
-        val now = System.currentTimeMillis()
-        if (lastChangeTime == 0L) {
-            lastChangeTime = now
+    fun onLightStateChanged(isLightOn: Boolean, durationMs: Long) {
+        Log.d("MorseDecoder", "StateChange: ${if (isLightOn) "OFF→ON" else "ON→OFF"}, prevDuration=${durationMs}ms, stage=$preambleStage")
+        
+        // === PREAMBLE DETECTION ===
+        if (!messageStarted) {
+            when (preambleStage) {
+                0 -> { // Esperando primera luz ON_1 (800ms)
+                    // Cuando se APAGA después del primer ON
+                    if (!isLightOn && inRange(durationMs, PREAMBLE_ON_1_MIN, PREAMBLE_ON_1_MAX)) {
+                        preambleStage = 1
+                        Log.w("MorseDecoder", "[1/4] ✓ ON_1 = ${durationMs}ms (esperado 700-900ms)")
+                    } else if (!isLightOn) {
+                        Log.d("MorseDecoder", "[1/4] ✗ ON duró ${durationMs}ms (esperado 700-900ms)")
+                    }
+                }
+                1 -> { // Esperando OFF_1 (400ms)
+                    // Cuando se ENCIENDE después del primer OFF
+                    if (isLightOn && inRange(durationMs, PREAMBLE_OFF_1_MIN, PREAMBLE_OFF_1_MAX)) {
+                        preambleStage = 2
+                        Log.w("MorseDecoder", "[2/4] ✓ OFF_1 = ${durationMs}ms (esperado 300-500ms)")
+                    } else if (isLightOn) {
+                        Log.d("MorseDecoder", "[2/4] ✗ OFF duró ${durationMs}ms, RESET")
+                        preambleStage = 0
+                    }
+                }
+                2 -> { // Esperando segunda luz ON_2 (800ms)
+                    // Cuando se APAGA después del segundo ON
+                    if (!isLightOn && inRange(durationMs, PREAMBLE_ON_2_MIN, PREAMBLE_ON_2_MAX)) {
+                        preambleStage = 3
+                        Log.w("MorseDecoder", "[3/4] ✓ ON_2 = ${durationMs}ms (esperado 700-900ms)")
+                    } else if (!isLightOn) {
+                        Log.d("MorseDecoder", "[3/4] ✗ ON duró ${durationMs}ms, RESET")
+                        preambleStage = 0
+                    }
+                }
+                3 -> { // Esperando OFF_2 final (800ms)
+                    // Cuando se ENCIENDE después del segundo OFF
+                    if (isLightOn && inRange(durationMs, PREAMBLE_OFF_2_MIN, PREAMBLE_OFF_2_MAX)) {
+                        messageStarted = true
+                        preambleStage = 0
+                        Log.w("MorseDecoder", "[4/4] ✓ OFF_2 = ${durationMs}ms → 🎉 PREAMBLE COMPLETO! Decodificando mensaje...")
+                    } else if (isLightOn) {
+                        Log.d("MorseDecoder", "[4/4] ✗ OFF duró ${durationMs}ms, RESET")
+                        preambleStage = 0
+                    }
+                }
+            }
             return
         }
 
-        val duration = now - lastChangeTime
-        lastChangeTime = now
-
-        if (isLightOn) {
-            // The light just turned ON, meaning it was OFF for 'duration'
-            processOffDuration(duration)
+        // === MESSAGE DECODING (después del preamble) ===
+        // Cuando se APAGA: procesamos el ON que acaba de terminar (DOT/DASH)
+        // Cuando se ENCIENDE: procesamos el OFF que acaba de terminar (gap)
+        if (!isLightOn) {
+            // LED se acaba de apagar → el ON anterior fue un símbolo
+            processOnDuration(durationMs)
         } else {
-            // The light just turned OFF, meaning it was ON for 'duration'
-            processOnDuration(duration)
+            // LED se acaba de encender → el OFF anterior fue un gap
+            processOffDuration(durationMs)
         }
     }
 
-    /**
-     * Processes the duration of an ON period (light was on).
-     *
-     * Determines whether the duration represents a dot or dash based on
-     * the threshold between DOT_DURATION * 2.
-     *
-     * @param duration The duration the light was on in milliseconds
-     */
-    private fun processOnDuration(duration: Long) {
-        // Threshold between Dot (1 unit) and Dash (3 units) is 2 units.
-        // 2 units = DOT_DURATION * 2 = 400ms
-        val threshold = DOT_DURATION * 2
-
-        if (duration < threshold) {
-            currentSymbol.append(".")
-        } else {
-            currentSymbol.append("-")
+    private fun processOnDuration(durationMs: Long) {
+        // Clasificar ON como DOT (punto) o DASH (raya)
+        when {
+            inRange(durationMs, DOT_MIN, DOT_MAX) -> {
+                currentSymbol.append(".")
+                Log.w("MorseDecoder", "· DOT (${durationMs}ms) → símbolo actual: $currentSymbol")
+            }
+            inRange(durationMs, DASH_MIN, DASH_MAX) -> {
+                currentSymbol.append("-")
+                Log.w("MorseDecoder", "━ DASH (${durationMs}ms) → símbolo actual: $currentSymbol")
+            }
+            else -> Log.d("MorseDecoder", "⚠ ON=${durationMs}ms fuera de rango (esperado DOT 150-250 o DASH 450-750)")
         }
     }
 
-    /**
-     * Processes the duration of an OFF period (light was off).
-     *
-     * Interprets pauses as symbol separators, letter separators, or word separators
-     * based on their duration relative to standard Morse timing.
-     *
-     * @param duration The duration the light was off in milliseconds
-     */
-    private fun processOffDuration(duration: Long) {
-        if (isCloseTo(duration, SYMBOL_SPACE)) {
-            // Just a gap between parts of a letter, do nothing
-        } else if (isCloseTo(duration, LETTER_SPACE)) {
-            // End of a letter
-            decodeCurrentSymbol()
-        } else if (duration >= WORD_SPACE - tolerance) {
-            // End of a word
-            decodeCurrentSymbol()
-            currentMessage.append(" ")
-            decodedMessage = currentMessage.toString()
+    private fun processOffDuration(durationMs: Long) {
+        // Clasificar OFF como espacio entre símbolos, letras o palabras
+        when {
+            inRange(durationMs, SYMBOL_SPACE_MIN, SYMBOL_SPACE_MAX) -> {
+                Log.d("MorseDecoder", "  GAP símbolo (${durationMs}ms) → continuar letra")
+                // Continuar con el símbolo actual
+            }
+            inRange(durationMs, LETTER_SPACE_MIN, LETTER_SPACE_MAX) -> {
+                Log.w("MorseDecoder", "   GAP letra (${durationMs}ms) → decodificar: $currentSymbol")
+                decodeCurrentSymbol()
+            }
+            inRange(durationMs, WORD_SPACE_MIN, WORD_SPACE_MAX) -> {
+                Log.w("MorseDecoder", "    GAP palabra (${durationMs}ms)")
+                decodeCurrentSymbol()
+                currentMessage.append(" ")
+                decodedMessage = currentMessage.toString()
+                Log.w("MorseDecoder", "📝 Mensaje: '$decodedMessage'")
+            }
+            else -> Log.d("MorseDecoder", "⚠ OFF=${durationMs}ms fuera de rango (esperado 150-250, 450-750 o 1200-1600)")
         }
     }
 
-    /**
-     * Decodes the current accumulated symbol and adds it to the message.
-     *
-     * Looks up the current symbol in the Morse code map and appends the
-     * corresponding character to the message if found.
-     */
     private fun decodeCurrentSymbol() {
         if (currentSymbol.isNotEmpty()) {
-            val char = morseCodeMapReverse[currentSymbol.toString()]
+            val symbolStr = currentSymbol.toString()
+            val char = morseCodeMapReverse[symbolStr]
             if (char != null) {
                 currentMessage.append(char)
                 decodedMessage = currentMessage.toString()
+                Log.w("MorseDecoder", "✓ '$symbolStr' → '$char' | Mensaje: '$decodedMessage'")
+            } else {
+                Log.w("MorseDecoder", "✗ Símbolo desconocido: '$symbolStr'")
             }
             currentSymbol.clear()
         }
     }
 
-    /**
-     * Checks if a duration value is close to a target value within tolerance.
-     *
-     * @param value The measured duration
-     * @param target The expected duration
-     * @return true if the value is within tolerance of the target
-     */
-    private fun isCloseTo(value: Long, target: Long): Boolean {
-        return Math.abs(value - target) <= tolerance
+    private fun inRange(value: Long, min: Long, max: Long): Boolean {
+        return value in min..max
     }
 
-    /**
-     * Resets the decoder state, clearing all buffers and the decoded message.
-     */
     fun reset() {
         currentMessage.clear()
         currentSymbol.clear()
-        lastChangeTime = 0L
+        messageStarted = false
+        preambleStage = 0
         decodedMessage = ""
     }
 }

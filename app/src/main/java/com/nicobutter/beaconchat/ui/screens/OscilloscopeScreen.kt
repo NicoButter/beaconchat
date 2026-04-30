@@ -336,30 +336,30 @@ private fun CameraPreview(
                 
                 val camera2Interop = Camera2Interop.Extender(imageAnalysisBuilder)
                 
-                // 1. Tiempo de exposición CORTO (8ms = 1/120s)
+                // 1. Tiempo de exposición: 16ms para mayor alcance
                 camera2Interop.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AE_MODE,
                     CaptureRequest.CONTROL_AE_MODE_OFF
                 )
                 camera2Interop.setCaptureRequestOption(
                     CaptureRequest.SENSOR_EXPOSURE_TIME,
-                    8_000_000L  // 8ms
+                    16_000_000L  // 16ms = 1/60s - Mayor sensibilidad
                 )
                 
-                // 2. ISO fijo para menos ruido
+                // 2. ISO alto para mayor distancia
                 camera2Interop.setCaptureRequestOption(
                     CaptureRequest.SENSOR_SENSITIVITY,
-                    400  // ISO 400
+                    800  // ISO 800 - Mayor alcance
                 )
                 
-                // 3. Focus fijo en infinito
+                // 3. Focus fijo en distancia media
                 camera2Interop.setCaptureRequestOption(
                     CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_OFF
                 )
                 camera2Interop.setCaptureRequestOption(
                     CaptureRequest.LENS_FOCUS_DISTANCE,
-                    0.0f
+                    2.0f  // Foco a ∼50cm
                 )
                 
                 // 4. White balance fijo
