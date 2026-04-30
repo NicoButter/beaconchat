@@ -448,16 +448,25 @@ class LightScanner : ImageAnalysis.Analyzer {
     
     private fun calculateAngle(posX: Float, posY: Float): Float {
         // Convertir posición en frame (0-1) a ángulo en grados
-        // Centro del frame = 0°, derecha = 90°, izquierda = -90°
-        val centerX = 0.5f
-        val centerY = 0.5f
+        // En coordenadas de cámara/display:
+        // posX = 0 es IZQUIERDA, posX = 1 es DERECHA
+        // posY = 0 es ARRIBA, posY = 1 es ABAJO
         
-        val dx = posX - centerX
-        val dy = posY - centerY
+        // El radar usa coordenadas polares estándar en Canvas:
+        // 0 grados es DERECHA (coincide con posX = 1)
+        // 90 grados es ABAJO (coincide con posY = 1)
+        // 180 grados es IZQUIERDA (coincide con posX = 0)
+        // 270/-90 grados es ARRIBA (coincide con posY = 0)
         
-        // atan2 devuelve radianes, convertir a grados
+        val dx = posX - 0.5f  // -0.5 a 0.5
+        val dy = posY - 0.5f  // -0.5 a 0.5
+        
+        // atan2(y, x) devuelve el ángulo desde el eje X positivo (derecha)
         val angleRad = atan2(dy.toDouble(), dx.toDouble())
-        val angleDeg = Math.toDegrees(angleRad).toFloat()
+        var angleDeg = Math.toDegrees(angleRad).toFloat()
+        
+        // Asegurar rango 0-360 para consistencia con getDirection()
+        if (angleDeg < 0) angleDeg += 360f
         
         return angleDeg
     }

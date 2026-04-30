@@ -127,10 +127,19 @@ fun MeshScreen(
     var autoScanEnabled by remember { mutableStateOf(true) }
 
     // Auto-start SOLO si el usuario tiene auto-scan habilitado
+    // Se agregan chequeos de seguridad adicionales para evitar re-entradas constantes
     LaunchedEffect(hasPermissions, bluetoothEnabled, autoScanEnabled) {
         if (hasPermissions && bluetoothEnabled && autoScanEnabled) {
-            if (!isScanning) meshController.startScanning()
-            if (!isAdvertising && callsign.isNotBlank()) meshController.startAdvertising(callsign)
+            if (!isScanning) {
+                meshController.startScanning()
+            }
+            if (!isAdvertising && callsign.isNotBlank()) {
+                meshController.startAdvertising(callsign)
+            }
+        } else if (!autoScanEnabled || !bluetoothEnabled) {
+            // Si el usuario desactivó el auto-scan o el bluetooth, nos aseguramos de detener los procesos
+            meshController.stopScanning()
+            meshController.stopAdvertising()
         }
     }
 

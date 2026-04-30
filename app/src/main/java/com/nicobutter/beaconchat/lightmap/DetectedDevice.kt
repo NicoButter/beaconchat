@@ -60,20 +60,21 @@ data class DetectedDevice(
 
     /**
      * Returns approximate cardinal direction based on angle.
+     * El radar usa: 0=Derecha(E), 90=Abajo(S), 180=Izquierda(W), 270=Arriba(N)
      *
      * @return Cardinal direction abbreviation (N, NE, E, SE, S, SW, W, NW)
      */
     fun getDirection(): String {
         val normalizedAngle = ((angle + 360) % 360).toInt()
         return when (normalizedAngle) {
-            in 0..22, in 338..360 -> "E"
-            in 23..67 -> "NE"
-            in 68..112 -> "N"
-            in 113..157 -> "NW"
-            in 158..202 -> "W"
-            in 203..247 -> "SW"
-            in 248..292 -> "S"
-            in 293..337 -> "SE"
+            in 0..22, in 338..360 -> "E"   // Derecha
+            in 23..67 -> "SE"              // Derecha-Abajo
+            in 68..112 -> "S"              // Abajo
+            in 113..157 -> "SW"            // Izquierda-Abajo
+            in 158..202 -> "W"             // Izquierda
+            in 203..247 -> "NW"            // Izquierda-Arriba
+            in 248..292 -> "N"              // Arriba
+            in 293..337 -> "NE"            // Derecha-Arriba
             else -> "?"
         }
     }

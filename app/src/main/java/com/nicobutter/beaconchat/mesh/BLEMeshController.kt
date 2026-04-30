@@ -105,7 +105,15 @@ class BLEMeshController(private val context: Context) {
             return
         }
 
+        // Si ya estamos anunciando, no hacer nada
+        if (_isAdvertising.value) return
+
         try {
+            // Re-obtener el advertiser si es nulo (sucede si BT se activó después del init)
+            if (bluetoothLeAdvertiser == null) {
+                bluetoothLeAdvertiser = bluetoothAdapter?.bluetoothLeAdvertiser
+            }
+
             // Start GATT Server
             startGattServer()
 
@@ -129,8 +137,11 @@ class BLEMeshController(private val context: Context) {
             Log.d(TAG, "Started advertising with callsign: $callsign")
         } catch (e: SecurityException) {
             Log.e(TAG, "Security exception starting advertising", e)
+            _lastError.value = "Error de seguridad en BLE"
         } catch (e: Exception) {
             Log.e(TAG, "Error starting advertising", e)
+            _lastError.value = "No se pudo iniciar visibilidad"
+            _isAdvertising.value = false
         }
     }
 
@@ -145,6 +156,9 @@ class BLEMeshController(private val context: Context) {
             Log.d(TAG, "Stopped advertising")
         } catch (e: SecurityException) {
             Log.e(TAG, "Security exception stopping advertising", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping advertising", e)
+            _isAdvertising.value = false // Forzar estado aunque falle el hardware
         }
     }
 
@@ -160,7 +174,15 @@ class BLEMeshController(private val context: Context) {
             return
         }
 
+        // Si ya estamos escaneando, no hacer nada
+        if (_isScanning.value) return
+
         try {
+            // Re-obtener el scanner si es nulo
+            if (bluetoothLeScanner == null) {
+                bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
+            }
+
             val scanSettings =
                     ScanSettings.Builder()
                             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -175,8 +197,13 @@ class BLEMeshController(private val context: Context) {
             Log.d(TAG, "Started scanning")
         } catch (e: SecurityException) {
             Log.e(TAG, "Security exception starting scan", e)
+            _lastError.value = "Error de seguridad en Escaneo"
         } catch (e: Exception) {
             Log.e(TAG, "Error starting scan", e)
+            _lastError.value = "No se pudo iniciar escaneo"
+            _isScanning.value = false
+        }
+    }
         }
     }
 
@@ -190,6 +217,9 @@ class BLEMeshController(private val context: Context) {
             Log.d(TAG, "Stopped scanning")
         } catch (e: SecurityException) {
             Log.e(TAG, "Security exception stopping scan", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping scan", e)
+            _isScanning.value = false
         }
     }
 
@@ -207,6 +237,12 @@ class BLEMeshController(private val context: Context) {
         if (!checkBluetoothPermissions()) {
             Log.e(TAG, "Missing Bluetooth permissions for sendMessage")
             _lastError.value = "Faltan permisos de Bluetooth"
+            return
+        }
+        
+        // No permitir enviar si ya hay un envío en curso
+        if (_isSending.value) {
+            Log.w(TAG, "Already sending a message, please wait")
             return
         }
         
@@ -273,23 +309,11 @@ class BLEMeshController(private val context: Context) {
                                     Log.d(TAG, "Write characteristic initiated: $success")
 
                                     if (success) {
-                                        // Add to local messages
-                                        val chatMessage =
-                                                ChatMessage(
-                                                        senderId = "ME",
-                                                        senderName = myCallsign,
-                                                        recipientId = peerAddress,
-                                                        content = message,
-                                                        timestamp = System.currentTimeMillis(),
-                                                        isFromMe = true
-                                                )
-                                        val currentMessages = _messages.value.toMutableList()
-                                        currentMessages.add(chatMessage)
-                                        _messages.value = currentMessages
-                                        Log.d(TAG, "Message added to local list")
+                                        // Mensaje iniciado con éxito (se confirma en onCharacteristicWrite)
                                     } else {
-                                        _lastError.value = "Error al enviar mensaje"
+                                        _lastError.value = "Error al iniciar escritura"
                                         _isSending.value = false
+                                        gatt.disconnect()
                                     }
                                 } else {
                                     Log.e(TAG, "Message characteristic not found in service")
@@ -313,6 +337,21 @@ class BLEMeshController(private val context: Context) {
                             _isSending.value = false
                             if (status == BluetoothGatt.GATT_SUCCESS) {
                                 Log.d(TAG, "Message sent successfully!")
+                                
+                                // AGREGAR EL MENSAJE LOCALMENTE SOLO AL TENER ÉXITO
+                                val chatMessage =
+                                        ChatMessage(
+                                                senderId = "ME",
+                                                senderName = myCallsign,
+                                                recipientId = peerAddress,
+                                                content = message,
+                                                timestamp = System.currentTimeMillis(),
+                                                isFromMe = true
+                                        )
+                                val currentMessages = _messages.value.toMutableList()
+                                currentMessages.add(chatMessage)
+                                _messages.value = currentMessages
+                                
                                 _lastError.value = null
                             } else {
                                 Log.e(TAG, "Failed to send message. Status: $status")
@@ -325,8 +364,12 @@ class BLEMeshController(private val context: Context) {
             )
         } catch (e: SecurityException) {
             Log.e(TAG, "Security exception sending message", e)
+            _isSending.value = false
+            _lastError.value = "Error de permisos"
         } catch (e: Exception) {
             Log.e(TAG, "Error sending message", e)
+            _isSending.value = false
+            _lastError.value = "Error desconocido al enviar"
         }
     }
 
@@ -578,6 +621,14 @@ class BLEMeshController(private val context: Context) {
      * the UI synchronized with the actual Bluetooth state.
      */
     fun updateBluetoothState() {
-        _bluetoothEnabled.value = bluetoothAdapter?.isEnabled == true
+        val isEnabled = bluetoothAdapter?.isEnabled == true
+        _bluetoothEnabled.value = isEnabled
+        
+        // Si se desactivó el bluetooth, resetear estados
+        if (!isEnabled) {
+            _isAdvertising.value = false
+            _isScanning.value = false
+            _peers.value = emptyList()
+        }
     }
 }
