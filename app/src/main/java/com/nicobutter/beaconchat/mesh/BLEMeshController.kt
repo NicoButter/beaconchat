@@ -204,8 +204,6 @@ class BLEMeshController(private val context: Context) {
             _isScanning.value = false
         }
     }
-        }
-    }
 
     /** Stop scanning */
     fun stopScanning() {
