@@ -23,7 +23,8 @@ And that flashlight can scream for you.
 - Sends encoded messages in **Morse code** using the LED flashlight.
 - Uses **vibration** as a tactile channel (for people under rubble).
 - **Detects vibrations** using the accelerometer for non-visual communication.
-- Allows **any other phone** to read it with its camera.
+- Silently broadcasts a **BLE emergency beacon** — invisible and inaudible.
+- Allows **any other phone** to read it with its camera or via BLE scan.
 - Generates and scans **QR Codes** for quick data exchange.
 - Works **100% offline** with no infrastructure dependency.
 
@@ -57,6 +58,47 @@ Native support for 9 writing systems with automatic language detection:
 - **Cyrillic**, **Greek**, **Hebrew**, **Arabic**, **Japanese (Wabun)**, **Korean (Hangul)**, **Thai**, **Persian**.
 
 ### 📥 Receiving Channels
+Native support for 9 writing systems with automatic language detection:
+- **Latin**: Spanish, English, French, German, etc.
+- **Cyrillic**, **Greek**, **Hebrew**, **Arabic**, **Japanese (Wabun)**, **Korean (Hangul)**, **Thai**, **Persian**.
+
+### 🆘 Emergency Emission Channels (`EmergencyManager`)
+
+As of **v0.2.0**, all transmission is orchestrated by a single controller:
+
+```kotlin
+// The UI does only this:
+controller.startEmergency(EmergencyType.SOS, EmergencyMode.ALL)
+```
+
+`EmergencyManager` automatically activates the right channels for the chosen mode:
+
+| Mode | Flashlight | Vibration | Ultrasound | BLE |
+|------|:---:|:---:|:---:|:---:|
+| `ALL` | ✅ | ✅ | ✅ | ✅ |
+| `LIGHT` | ✅ | ❌ | ❌ | ❌ |
+| `VIBRATION` | ❌ | ✅ | ❌ | ❌ |
+| `SOUND` | ❌ | ❌ | ✅ | ❌ |
+| `BLE` | ❌ | ❌ | ❌ | ✅ |
+| `DISCREET` | ❌ | ❌ | ❌ | ✅ |
+
+### 📡 BLE Emergency Beacon (NEW)
+
+**Discreet Mode** — silently transmits and detects emergencies via Bluetooth Low Energy, with no light or sound:
+
+- **BleEmitter**: broadcasts a BLE advertisement with the encoded emergency type (UUID `0000BECE-...`)
+- **BleScanner**: detects nearby BeaconChat emergency beacons from other devices
+- Signal quality estimated by RSSI (Excellent / Good / Weak)
+- Ideal for: situations where light betrays position (kidnapping, hostage scenarios)
+- Requires `BLUETOOTH_ADVERTISE` / `BLUETOOTH_SCAN` permissions (Android 12+)
+
+### 🔍 Signal Scanner Screen (NEW)
+
+New unified reception screen combining two channels in parallel:
+- **BLE**: passive scan for nearby emergency beacons with signal strength indicator
+- **Optical**: real-time Morse decoding via camera (same engine as the Receiver screen)
+
+### 📥 Receiving Channels
 - **📷 Optical Oscilloscope**: Morse decoding via camera @30fps.
 - **📳 Tactile Oscilloscope**: Vibration decoding via accelerometer @200Hz.
 - **🔍 QR Scanner**: Instant reading of QR encoded messages.
@@ -65,7 +107,12 @@ Native support for 9 writing systems with automatic language detection:
 - **🔦 Flashlight**: LED flash with precise millisecond control.
 - **📳 Vibrator**: Tactile Morse patterns.
 - **🔊 Ultrasound**: Data transmission via inaudible frequencies (Experimental).
+- **📡 BLE Beacon**: Silent emergency broadcast via Bluetooth Low Energy.
 - **🔳 QR Generator**: QR code creation with message and user Callsign.
+
+### 📡 Bluetooth Mesh (Radar)
+- **Peer Discovery**: Detects nearby BeaconChat devices via Bluetooth Low Energy.
+- **Network Status**: Displays Callsign, signal quality (RSSI), and last-seen timestamp.
 
 ## 📸 Screenshots
 *(Coming Soon)*
@@ -78,64 +125,77 @@ Native support for 9 writing systems with automatic language detection:
 - Accelerometer (for vibration detection).
 
 ### Build (Developers)
-]0;lordcommander@fedora:~/proyectos_2024/beaconchat]3008;start=ada8e335-a458-41d6-8ed6-9e283e3f7f18;machineid=7fc180b5808f4d5daa1e8fa9073d9c54;user=lordcommander;hostname=fedora;bootid=ae3be654-f1ec-4aad-b2cf-a64a576866db;pid=00000000000000196865;type=shell;cwd=/home/lordcommander/proyectos_2024/beaconchat\Starting a Gradle Daemon, 2 incompatible and 1 stopped Daemons could not be reused, use --status for details
-
-> Configure project :app
-WARNING: The option setting 'android.defaults.buildfeatures.buildconfig=true' is deprecated.
-The current default is 'false'.
-It will be removed in version 10.0 of the Android Gradle plugin.
-To keep using this feature, add the following to your module-level build.gradle files:
-    android.buildFeatures.buildConfig = true
-or from Android Studio, click: `Refactor` > `Migrate BuildConfig to Gradle Build Files`.
-
-> Task :app:preBuild UP-TO-DATE
-> Task :app:preDebugBuild UP-TO-DATE
-> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
-> Task :app:generateDebugBuildConfig UP-TO-DATE
-> Task :app:checkDebugAarMetadata UP-TO-DATE
-> Task :app:processDebugNavigationResources UP-TO-DATE
-> Task :app:compileDebugNavigationResources UP-TO-DATE
-> Task :app:generateDebugResValues UP-TO-DATE
-> Task :app:mapDebugSourceSetPaths UP-TO-DATE
-> Task :app:generateDebugResources UP-TO-DATE
-> Task :app:mergeDebugResources UP-TO-DATE
-> Task :app:packageDebugResources UP-TO-DATE
-> Task :app:parseDebugLocalResources UP-TO-DATE
-> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
-> Task :app:extractDeepLinksDebug UP-TO-DATE
-> Task :app:processDebugMainManifest UP-TO-DATE
-> Task :app:processDebugManifest UP-TO-DATE
-> Task :app:processDebugManifestForPackage UP-TO-DATE
-> Task :app:processDebugResources UP-TO-DATE
-> Task :app:javaPreCompileDebug UP-TO-DATE
-> Task :app:mergeDebugShaders UP-TO-DATE
-> Task :app:compileDebugShaders NO-SOURCE
-> Task :app:generateDebugAssets UP-TO-DATE
-> Task :app:mergeDebugAssets UP-TO-DATE
-> Task :app:compressDebugAssets UP-TO-DATE
-> Task :app:checkDebugDuplicateClasses UP-TO-DATE
-> Task :app:desugarDebugFileDependencies UP-TO-DATE
-> Task :app:mergeExtDexDebug UP-TO-DATE
-> Task :app:mergeLibDexDebug UP-TO-DATE
-> Task :app:mergeDebugJniLibFolders UP-TO-DATE
-> Task :app:mergeDebugNativeLibs UP-TO-DATE
-> Task :app:stripDebugDebugSymbols UP-TO-DATE
-> Task :app:validateSigningDebug UP-TO-DATE
-> Task :app:writeDebugAppMetadata UP-TO-DATE
-> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
-
-> Task :app:compileDebugKotlin
-
-> Task :app:compileDebugKotlin FAILED
-
-[Incubating] Problems report is available at: file:///home/lordcommander/proyectos_2024/beaconchat/build/reports/problems/problems-report.html
-
-Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
-
-You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
-
-For more on this, please refer to https://docs.gradle.org/8.13/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
-31 actionable tasks: 1 executed, 30 up-to-date
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+./gradlew assembleDebug
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
 
 ---
-Designed for resilience. **BeaconChat** 2024.
+
+## 📋 Changelog
+
+### v0.2.0 — Clean Architecture + BLE Emergency (May 2026)
+
+**Full architectural refactor.** Clear layer separation introduced:
+
+```
+domain/     → EmergencyType, EmergencyMode, EmergencyState, SignalConfig
+emitter/    → SignalEmitter, LightEmitter, VibrationEmitter, SoundEmitter, BleEmitter
+scanner/    → SignalScanner, BleScanner
+controller/ → EmergencyManager (central orchestrator)
+```
+
+**New features:**
+- ✅ `BleEmitter` — silent BLE emergency beacon (UUID `0000BECE-...`)
+- ✅ `BleScanner` — passive detection of nearby BLE emergencies
+- ✅ `EmergencyManager` — orchestrator with global `StateFlow<EmergencyState>`
+- ✅ `EmergencyMode.DISCREET` — BLE-only mode, no light or sound
+- ✅ **"Signal Scanner" screen** — BLE + optical reception in parallel
+- ✅ Simplified UI: transmission screen calls `startEmergency(type, mode)` and nothing else
+- ✅ `EmergencyType` in domain layer (no Compose dependency): SOS, HELP, TRAPPED, KIDNAPPED, INJURED, OK, LOCATION
+
+**Internal changes:**
+- `EmergencyType` and `EmergencyMethod` removed from the UI layer
+- `EmergencyMethod` renamed to `EmergencyMode` and moved to `domain/`
+- `TransmitterScreen` delegates all logic via `onEmergencyTrigger(type, mode)` callback
+- `EmergencyTransmissionScreen` no longer manages coroutines or controllers directly
+
+### v0.1.0 — Initial release (2024)
+- VLC optical protocol with START/END synchronization
+- Multi-language Morse support (9 alphabets)
+- Channels: flashlight, vibration, ultrasound, QR
+- BLE mesh radar (peer discovery)
+- Real-time optical and tactile decoding
+
+---
+
+## 👤 Author
+
+**Nicolás Butterfield**
+- 📧 Email: [nicobutter@gmail.com](mailto:nicobutter@gmail.com)
+- 🐙 GitHub: [@nicobutter](https://github.com/nicobutter)
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! BeaconChat is emergency software that can save lives.
+
+### Areas
+- 🌍 **Translations**: Add more languages/Morse alphabets
+- 📡 **Protocol**: Improve timing, filters, robustness
+- 🎨 **UI/UX**: More accessible design for crisis situations
+- 🧪 **Testing**: Tests in real scenarios
+- 📖 **Docs**: Guides, tutorials, use cases
+
+---
+
+## 📜 License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+**Free to use for humanitarian and emergency purposes.**
+
+---
+Designed for resilience. **BeaconChat** 2026.

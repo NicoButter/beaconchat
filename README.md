@@ -152,6 +152,42 @@ Decodifica señales del entorno con procesamiento avanzado:
   - Visualización en tiempo real de magnitud de vibración
 - **🔍 Escáner QR:** Lee códigos QR generados por otros usuarios de BeaconChat
 
+### 🆘 Canales de Emisión de Emergencia (`EmergencyManager`)
+
+A partir de la versión **v0.2.0**, la transmisión está centralizada en un único controlador:
+
+```kotlin
+// La UI hace solo esto:
+controller.startEmergency(EmergencyType.SOS, EmergencyMode.ALL)
+```
+
+El `EmergencyManager` orquesta automáticamente todos los canales activos según el modo elegido:
+
+| Modo | Linterna | Vibración | Ultrasonido | BLE |
+|------|:---:|:---:|:---:|:---:|
+| `ALL` (Todo) | ✅ | ✅ | ✅ | ✅ |
+| `LIGHT` (Luz) | ✅ | ❌ | ❌ | ❌ |
+| `VIBRATION` (Vibración) | ❌ | ✅ | ❌ | ❌ |
+| `SOUND` (Ultrasonido) | ❌ | ❌ | ✅ | ❌ |
+| `BLE` (Bluetooth) | ❌ | ❌ | ❌ | ✅ |
+| `DISCREET` (Discreto) | ❌ | ❌ | ❌ | ✅ |
+
+### 📡 BLE Emergency Beacon (NUEVO)
+
+**Modo Discreto** — Transmite y detecta emergencias silenciosamente via Bluetooth Low Energy sin emitir luz ni sonido:
+
+- **BleEmitter**: Emite un advertisement BLE con el tipo de emergencia codificado (UUID `0000BECE-...`)
+- **BleScanner**: Detecta beacons de emergencia de otros dispositivos BeaconChat en el entorno
+- Calidad de señal estimada por RSSI (Excelente / Buena / Débil)
+- Ideal para: situaciones donde la luz delata la posición (secuestros, rehenes)
+- Requiere permiso `BLUETOOTH_ADVERTISE` / `BLUETOOTH_SCAN` (Android 12+)
+
+### 🔍 Buscar Señales (NUEVO)
+
+Nueva pantalla unificada de recepción que combina en paralelo:
+- **BLE**: Escaneo pasivo de beacons de emergencia cercanos con indicador de señal
+- **Óptico**: Decodificación Morse via cámara en tiempo real (mismo canal que la pantalla Receptor)
+
 ### 📡 Bluetooth Mesh (Radar)
 - **Descubrimiento de Pares:** Detecta otros dispositivos BeaconChat cercanos mediante Bluetooth Low Energy (BLE).
 - **Estado de Red:** Visualiza el Callsign, la calidad de la señal (RSSI) y la última vez que fueron vistos.
@@ -245,7 +281,44 @@ El protocolo óptico está basado en investigación científica y estándares in
 
 ---
 
-## 👤 Autor
+## � Changelog
+
+### v0.2.0 — Arquitectura Limpia + BLE Emergency (mayo 2026)
+
+**Arquitectura refactorizada por completo.** Se introdujo una separación clara en capas:
+
+```
+domain/     → EmergencyType, EmergencyMode, EmergencyState, SignalConfig
+emitter/    → SignalEmitter, LightEmitter, VibrationEmitter, SoundEmitter, BleEmitter
+scanner/    → SignalScanner, BleScanner
+controller/ → EmergencyManager (orquestador central)
+```
+
+**Nuevas funcionalidades:**
+- ✅ `BleEmitter` — beacon BLE de emergencia silencioso (UUID `0000BECE-...`)
+- ✅ `BleScanner` — detección pasiva de emergencias BLE cercanas
+- ✅ `EmergencyManager` — orquestador con `StateFlow<EmergencyState>` global
+- ✅ `EmergencyMode.DISCREET` — modo solo BLE sin luz ni ruido
+- ✅ Pantalla **"Buscar señales"** — BLE + óptico en paralelo
+- ✅ UI simplificada: la pantalla de transmisión llama `startEmergency(type, mode)` y nada más
+- ✅ `EmergencyType` en capa domain (sin dependencia de Compose): SOS, HELP, TRAPPED, KIDNAPPED, INJURED, OK, LOCATION
+
+**Cambios internos:**
+- `EmergencyType` y `EmergencyMethod` eliminados de la capa UI
+- `EmergencyMethod` renombrado a `EmergencyMode` y movido a `domain/`
+- `TransmitterScreen` delega toda lógica vía callback `onEmergencyTrigger(type, mode)`
+- `EmergencyTransmissionScreen` ya no gestiona coroutines ni controladores directamente
+
+### v0.1.0 — Versión inicial (2024)
+- Protocolo óptico VLC con sincronización START/END
+- Soporte Morse multi-idioma (9 alfabetos)
+- Canales: linterna, vibración, ultrasonido, QR
+- BLE mesh radar (descubrimiento de pares)
+- Decodificación óptica y táctil en tiempo real
+
+---
+
+## �👤 Autor
 
 **Nicolás Butterfield**
 - 📧 Email: [nicobutter@gmail.com](mailto:nicobutter@gmail.com)
