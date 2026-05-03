@@ -22,6 +22,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.nicobutter.beaconchat.controller.EmergencyManager
+import com.nicobutter.beaconchat.domain.EmergencyMode
+import com.nicobutter.beaconchat.domain.EmergencyType
 import com.nicobutter.beaconchat.transceiver.FlashlightController
 import com.nicobutter.beaconchat.transceiver.MorseEncoder
 import com.nicobutter.beaconchat.transceiver.BinaryEncoder
@@ -71,7 +74,8 @@ fun TransmitterScreen(
     vibrationController: VibrationController,
     soundController: SoundController,
     morseEncoder: MorseEncoder,
-    userPreferences: UserPreferences,
+    @Suppress("UNUSED_PARAMETER") userPreferences: UserPreferences,
+    onEmergencyTrigger: (EmergencyType, EmergencyMode) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var text by remember { mutableStateOf("") }
@@ -183,37 +187,33 @@ fun TransmitterScreen(
                 // Primera fila: SOS y AUXILIO
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                     QuickActionButton(
-                        label = "SOS", 
-                        icon = Icons.Default.Warning, 
-                        onClick = { startContinuousTransmission("SOS") }, 
-                        enabled = !isTransmitting, 
+                        label = "SOS",
+                        onClick = { onEmergencyTrigger(EmergencyType.SOS, EmergencyMode.ALL) },
+                        enabled = !isTransmitting,
                         modifier = Modifier.weight(1f).height(64.dp)
                     )
                     QuickActionButton(
-                        label = "AUXILIO", 
-                        icon = Icons.Default.Info, 
-                        onClick = { startContinuousTransmission("AUXILIO") }, 
-                        enabled = !isTransmitting, 
+                        label = "AUXILIO",
+                        onClick = { onEmergencyTrigger(EmergencyType.HELP, EmergencyMode.ALL) },
+                        enabled = !isTransmitting,
                         modifier = Modifier.weight(1f).height(64.dp)
                     )
                 }
-                
+
                 Spacer(modifier = Modifier.height(12.dp))
-                
-                // Segunda fila: AYUDA y OK
+
+                // Segunda fila: ATRAPADO y OK
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                     QuickActionButton(
-                        label = "AYUDA", 
-                        icon = Icons.Default.Info, 
-                        onClick = { startContinuousTransmission("AYUDA") }, 
-                        enabled = !isTransmitting, 
+                        label = "ATRAPADO",
+                        onClick = { onEmergencyTrigger(EmergencyType.TRAPPED, EmergencyMode.ALL) },
+                        enabled = !isTransmitting,
                         modifier = Modifier.weight(1f).height(64.dp)
                     )
                     QuickActionButton(
-                        label = "OK", 
-                        icon = Icons.Default.Info, 
-                        onClick = { startContinuousTransmission("OK") }, 
-                        enabled = !isTransmitting, 
+                        label = "DISCRETO",
+                        onClick = { onEmergencyTrigger(EmergencyType.SOS, EmergencyMode.DISCREET) },
+                        enabled = !isTransmitting,
                         modifier = Modifier.weight(1f).height(64.dp)
                     )
                 }
@@ -304,7 +304,7 @@ fun TransmitterScreen(
 }
 
 @Composable
-private fun QuickActionButton(label: String, icon: ImageVector, onClick: () -> Unit, enabled: Boolean, modifier: Modifier = Modifier) {
+private fun QuickActionButton(label: String, onClick: () -> Unit, enabled: Boolean, modifier: Modifier = Modifier) {
     Button(
         onClick = onClick, 
         enabled = enabled, 

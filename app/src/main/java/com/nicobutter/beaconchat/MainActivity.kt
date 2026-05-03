@@ -3,6 +3,7 @@ package com.nicobutter.beaconchat
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -26,7 +27,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.nicobutter.beaconchat.data.UserPreferences
+import com.nicobutter.beaconchat.controller.EmergencyManager
+import com.nicobutter.beaconchat.domain.EmergencyMode
+import com.nicobutter.beaconchat.domain.EmergencyType
+import com.nicobutter.beaconchat.emitter.BleEmitter
+import com.nicobutter.beaconchat.emitter.LightEmitter
+import com.nicobutter.beaconchat.emitter.SoundEmitter
+import com.nicobutter.beaconchat.emitter.VibrationEmitter
 import com.nicobutter.beaconchat.mesh.BLEMeshController
+import com.nicobutter.beaconchat.scanner.BleScanner
 import com.nicobutter.beaconchat.transceiver.FlashlightController
 import com.nicobutter.beaconchat.transceiver.MorseEncoder
 import com.nicobutter.beaconchat.transceiver.SoundController
@@ -36,12 +45,11 @@ import com.nicobutter.beaconchat.ui.screens.MeshScreen
 import com.nicobutter.beaconchat.ui.screens.OscilloscopeScreen
 import com.nicobutter.beaconchat.ui.screens.ReceiverScreen
 import com.nicobutter.beaconchat.ui.screens.SettingsScreen
+import com.nicobutter.beaconchat.ui.screens.SignalScannerScreen
 import com.nicobutter.beaconchat.ui.screens.TransmitterScreen
 import com.nicobutter.beaconchat.ui.screens.VibrationDetectorScreen
 import com.nicobutter.beaconchat.ui.screens.WelcomeScreen
 import com.nicobutter.beaconchat.ui.screens.EmergencyTransmissionScreen
-import com.nicobutter.beaconchat.ui.screens.EmergencyType
-import com.nicobutter.beaconchat.ui.screens.EmergencyMethod
 import com.nicobutter.beaconchat.ui.theme.BeaconChatTheme
 
 /**
@@ -58,15 +66,12 @@ class MainActivity : ComponentActivity() {
         private lateinit var vibrationController: VibrationController
         private lateinit var soundController: SoundController
         private lateinit var meshController: BLEMeshController
+        private lateinit var emergencyManager: EmergencyManager
+        private lateinit var bleScanner: BleScanner
         private lateinit var userPreferences: UserPreferences
 
-        /**
-         * Cleans up all hardware controllers to prevent conflicts between screens.
-         *
-         * Ensures flashlight is turned off, vibration is stopped, and audio
-         * resources are released before switching to a different screen.
-         */
         private fun cleanupControllers() {
+                emergencyManager.stopEmergency()
                 flashlightController.cleanup()
                 vibrationController.cleanup()
                 soundController.cleanup()
@@ -91,8 +96,17 @@ class MainActivity : ComponentActivity() {
                 vibrationController = VibrationController(this)
                 soundController = SoundController()
                 meshController = BLEMeshController(this)
+                bleScanner = BleScanner(this)
                 userPreferences = UserPreferences(this)
                 val morseEncoder = MorseEncoder()
+                emergencyManager = EmergencyManager(
+                        lightEmitter = LightEmitter(flashlightController),
+                        vibrationEmitter = VibrationEmitter(vibrationController),
+                        soundEmitter = SoundEmitter(soundController),
+                        bleEmitter = BleEmitter(this),
+                        morseEncoder = morseEncoder,
+                        scope = lifecycleScope
+                )
 
                 setContent {
                         BeaconChatTheme {
@@ -102,7 +116,7 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                         var currentScreen by remember { mutableStateOf("welcome") }
                                         var emergencyType by remember { mutableStateOf<EmergencyType?>(null) }
-                                        var emergencyMethod by remember { mutableStateOf(EmergencyMethod.LIGHT) }
+                                        var emergencyMode by remember { mutableStateOf(EmergencyMode.ALL) }
 
                                 Scaffold(
                                         modifier = Modifier.fillMaxSize(),
@@ -115,6 +129,7 @@ class MainActivity : ComponentActivity() {
                                                                 val navItems = listOf(
                                                                         Triple("transmit", "🔦", "Transmit"),
                                                                         Triple("receive", "📷", "Receive"),
+                                                                        Triple("scan", "🔍", "Scan"),
                                                                         Triple("mesh", "📡", "Mesh"),
                                                                         Triple("lightmap", "🎯", "Radar"),
                                                                         Triple("oscilloscope", "📊", "Scope"),
@@ -170,13 +185,13 @@ class MainActivity : ComponentActivity() {
                                                                 onEmergencySOS = {
                                                                         cleanupControllers()
                                                                         emergencyType = EmergencyType.SOS
-                                                                        emergencyMethod = EmergencyMethod.ALL
+                                                                        emergencyMode = EmergencyMode.ALL
                                                                         currentScreen = "emergency"
                                                                 },
                                                                 onEmergencyHelp = {
                                                                         cleanupControllers()
                                                                         emergencyType = EmergencyType.HELP
-                                                                        emergencyMethod = EmergencyMethod.ALL
+                                                                        emergencyMode = EmergencyMode.ALL
                                                                         currentScreen = "emergency"
                                                                 },
                                                                 modifier =
@@ -188,11 +203,8 @@ class MainActivity : ComponentActivity() {
                                                         emergencyType?.let { type ->
                                                                 EmergencyTransmissionScreen(
                                                                         emergencyType = type,
-                                                                        method = emergencyMethod,
-                                                                        flashlightController = flashlightController,
-                                                                        vibrationController = vibrationController,
-                                                                        soundController = soundController,
-                                                                        morseEncoder = morseEncoder,
+                                                                        mode = emergencyMode,
+                                                                        emergencyManager = emergencyManager,
                                                                         onDismiss = {
                                                                                 cleanupControllers()
                                                                                 currentScreen = "welcome"
@@ -210,6 +222,12 @@ class MainActivity : ComponentActivity() {
                                                                 soundController = soundController,
                                                                 morseEncoder = morseEncoder,
                                                                 userPreferences = userPreferences,
+                                                                onEmergencyTrigger = { type, mode ->
+                                                                        cleanupControllers()
+                                                                        emergencyType = type
+                                                                        emergencyMode = mode
+                                                                        currentScreen = "emergency"
+                                                                },
                                                                 modifier =
                                                                         Modifier.padding(
                                                                                 innerPadding
@@ -253,6 +271,14 @@ class MainActivity : ComponentActivity() {
                                                         )
                                                 "oscilloscope" ->
                                                         OscilloscopeScreen(
+                                                                modifier =
+                                                                        Modifier.padding(
+                                                                                innerPadding
+                                                                        )
+                                                        )
+                                                "scan" ->
+                                                        SignalScannerScreen(
+                                                                bleScanner = bleScanner,
                                                                 modifier =
                                                                         Modifier.padding(
                                                                                 innerPadding

@@ -7,7 +7,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,74 +18,37 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nicobutter.beaconchat.transceiver.FlashlightController
-import com.nicobutter.beaconchat.transceiver.SoundController
-import com.nicobutter.beaconchat.transceiver.VibrationController
-import com.nicobutter.beaconchat.transceiver.MorseEncoder
+import com.nicobutter.beaconchat.controller.EmergencyManager
+import com.nicobutter.beaconchat.domain.EmergencyMode
+import com.nicobutter.beaconchat.domain.EmergencyType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-
-/**
- * Emergency transmission types with their visual characteristics.
- */
-enum class EmergencyType(
-    val displayName: String,
-    val backgroundColor: Color,
-    val icon: String
-) {
-    SOS("SOS", Color(0xFFD32F2F), "🆘"),
-    HELP("AUXILIO", Color(0xFFFF6F00), "⚠️"),
-    OK("TODO BIEN", Color(0xFF388E3C), "✅"),
-    LOCATION("MI UBICACIÓN", Color(0xFF1976D2), "📍")
-}
-
-/**
- * Transmission method for emergency signals.
- */
-enum class EmergencyMethod(
-    val displayName: String,
-    val icon: String,
-    val description: String
-) {
-    LIGHT("Luz", "💡", "Transmitiendo con linterna"),
-    VIBRATION("Vibración", "📳", "Transmitiendo con vibración"),
-    SOUND("Ultrasonido", "🔊", "Transmitiendo con ultrasonido"),
-    ALL("Todo", "🌟", "Transmitiendo con todos los métodos")
-}
 
 /**
  * Emergency transmission screen with fullscreen visual feedback.
  *
- * Displays a prominent emergency transmission interface with animated
- * visual feedback, transmission status, elapsed time, and cancel button.
- * Designed for high-visibility emergency situations.
+ * The UI has one job: show status and let the user cancel.
+ * All transmission logic is delegated to [EmergencyManager]:
+ * ```
+ * emergencyManager.startEmergency(type, mode)
+ * ```
  *
- * @param emergencyType Type of emergency signal being transmitted
- * @param method Transmission method being used
- * @param flashlightController Controller for light-based transmission
- * @param vibrationController Controller for vibration-based transmission
- * @param soundController Controller for sound-based transmission
- * @param morseEncoder Encoder for Morse code signals
- * @param onDismiss Callback invoked when transmission is cancelled
- * @param modifier Modifier for customizing the layout
+ * @param emergencyType The semantic type of emergency to broadcast.
+ * @param mode How the signal is transmitted (channels).
+ * @param emergencyManager Orchestrator that drives the actual emitters.
+ * @param onDismiss Callback invoked when the user cancels.
  */
 @Composable
 fun EmergencyTransmissionScreen(
     emergencyType: EmergencyType,
-    method: EmergencyMethod,
-    flashlightController: FlashlightController,
-    vibrationController: VibrationController,
-    soundController: SoundController,
-    morseEncoder: MorseEncoder,
+    mode: EmergencyMode,
+    emergencyManager: EmergencyManager,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scope = rememberCoroutineScope()
     var elapsedSeconds by remember { mutableStateOf(0) }
-    var transmissionCount by remember { mutableStateOf(0) }
-    
-    // Pulsating animation synchronized with transmission
+
+    // Pulsating animation
     val infiniteTransition = rememberInfiniteTransition(label = "emergency_pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -97,7 +59,6 @@ fun EmergencyTransmissionScreen(
         ),
         label = "pulse_scale"
     )
-    
     val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.7f,
         targetValue = 1f,
@@ -107,65 +68,27 @@ fun EmergencyTransmissionScreen(
         ),
         label = "pulse_alpha"
     )
-    
-    // Timer counter
+
+    // Local elapsed-time counter
     LaunchedEffect(Unit) {
         while (isActive) {
             delay(1000)
             elapsedSeconds++
         }
     }
-    
-    // Continuous transmission
-    LaunchedEffect(Unit) {
-        val message = when (emergencyType) {
-            EmergencyType.SOS -> "SOS"
-            EmergencyType.HELP -> "HELP"
-            EmergencyType.OK -> "OK"
-            EmergencyType.LOCATION -> "HERE"
-        }
-        
-        val timings = morseEncoder.encode(message)
-        
-        while (isActive) {
-            try {
-                when (method) {
-                    EmergencyMethod.LIGHT -> {
-                        flashlightController.transmit(timings)
-                    }
-                    EmergencyMethod.VIBRATION -> {
-                        vibrationController.transmit(timings)
-                    }
-                    EmergencyMethod.SOUND -> {
-                        soundController.transmit(timings)
-                    }
-                    EmergencyMethod.ALL -> {
-                        launch { flashlightController.transmit(timings) }
-                        launch { vibrationController.transmit(timings) }
-                        launch { soundController.transmit(timings) }
-                    }
-                }
-                transmissionCount++
-                delay(500) // Short pause between transmissions
-            } catch (e: Exception) {
-                // Continue transmission even if one method fails
-            }
-        }
+
+    // Start transmission via manager; stop on leave
+    DisposableEffect(emergencyType, mode) {
+        emergencyManager.startEmergency(emergencyType, mode)
+        onDispose { emergencyManager.stopEmergency() }
     }
-    
-    // Cleanup on dismiss
-    DisposableEffect(Unit) {
-        onDispose {
-            flashlightController.stop()
-            vibrationController.cleanup()
-            soundController.cleanup()
-        }
-    }
-    
+
+    val backgroundColor = Color(emergencyType.colorArgb)
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(emergencyType.backgroundColor),
+            .background(backgroundColor),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -226,7 +149,7 @@ fun EmergencyTransmissionScreen(
                 modifier = Modifier.padding(vertical = 8.dp)
             )
             
-            // Method indicator with icon
+            // Mode indicator with icon
             Card(
                 modifier = Modifier.padding(vertical = 16.dp),
                 colors = CardDefaults.cardColors(
@@ -240,19 +163,19 @@ fun EmergencyTransmissionScreen(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Text(
-                        text = method.icon,
+                        text = mode.icon,
                         fontSize = 32.sp
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = method.description,
+                            text = mode.description,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Text(
-                            text = "Método: ${method.displayName}",
+                            text = "Modo: ${mode.displayName}",
                             fontSize = 14.sp,
                             color = Color.White.copy(alpha = 0.8f)
                         )
@@ -267,18 +190,15 @@ fun EmergencyTransmissionScreen(
                     .padding(vertical = 16.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                // Elapsed time
                 StatCard(
                     label = "Tiempo",
                     value = formatTime(elapsedSeconds),
                     icon = "⏱️"
                 )
-                
-                // Transmission count
                 StatCard(
-                    label = "Señales",
-                    value = "$transmissionCount",
-                    icon = "📡"
+                    label = "Canales",
+                    value = if (mode == EmergencyMode.ALL) "4" else "1",
+                    icon = mode.icon
                 )
             }
             
@@ -292,7 +212,7 @@ fun EmergencyTransmissionScreen(
                     .height(64.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
-                    contentColor = emergencyType.backgroundColor
+                    contentColor = backgroundColor
                 ),
                 shape = RoundedCornerShape(16.dp)
             ) {
