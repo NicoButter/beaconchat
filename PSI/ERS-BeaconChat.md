@@ -1,8 +1,8 @@
 # Especificación de Requerimientos de Software (ERS)
 ## BeaconChat - Sistema de Comunicación de Emergencia
 
-**Versión:** 1.0  
-**Fecha:** 6 de diciembre de 2025  
+**Versión:** 2.0  
+**Fecha:** 13 de diciembre de 2025  
 **Autor:** NicoButter  
 **Estado:** Aprobado
 
@@ -151,14 +151,14 @@ BeaconChat es una aplicación móvil standalone que opera sin dependencias de in
 
 **Criterios de Aceptación:**
 - AC-001.1: El sistema codifica texto a Morse en menos de 100ms
-- AC-001.2: La linterna LED parpadea según timing IEEE 802.15.7:
-  - DOT: 150ms ± 10ms
-  - DASH: 400ms ± 10ms
-  - GAP inter-símbolo: 150ms ± 10ms
-  - GAP inter-letra: 400ms ± 10ms
-  - GAP inter-palabra: 800ms ± 10ms
-- AC-001.3: Incluye marcador START (300-300-900ms)
-- AC-001.4: Incluye marcador END (600-100ms)
+- AC-001.2: La linterna LED parpadea con timing ajustado para detección a 30fps:
+  - DOT: 200ms (6 frames) ± 10ms
+  - DASH: 600ms (18 frames) ± 10ms
+  - GAP inter-símbolo: 200ms ± 10ms
+  - GAP inter-letra: 600ms ± 10ms
+  - GAP inter-palabra: 1200ms ± 10ms
+- AC-001.3: Incluye marcador START (LARGO-CORTO-LARGO): ON 800ms → OFF 400ms → ON 800ms → OFF 800ms
+- AC-001.4: Incluye marcador END: OFF 1000ms → ON 200ms
 - AC-001.5: Soporta transmisión continua (loop)
 - AC-001.6: Soporta transmisión única
 
@@ -179,12 +179,14 @@ BeaconChat es una aplicación móvil standalone que opera sin dependencias de in
 **Criterios de Aceptación:**
 - AC-002.1: Analiza frames de cámara a 30 fps mínimo
 - AC-002.2: Aplica filtro suavizado exponencial (α = 0.7)
-- AC-002.3: Usa umbral dinámico adaptativo: min + (max - min) × 0.4
-- AC-002.4: Detecta automáticamente marcador START
-- AC-002.5: Detecta automáticamente marcador END
+- AC-002.3: Usa umbral dinámico adaptativo: min + (max - min) × 0.4, **solo si (max - min) > 30** (contraste mínimo para evitar falsos positivos)
+- AC-002.4: Detecta automáticamente marcador START (LARGO-CORTO-LARGO)
+- AC-002.5: Detecta automáticamente marcador END (OFF 1000ms → ON 200ms)
 - AC-002.6: Decodifica Morse a texto con tasa de error < 5%
 - AC-002.7: Visualiza intensidad lumínica en tiempo real
 - AC-002.8: Muestra mensaje decodificado al finalizar
+- AC-002.9: Aplica tolerancia de ±100ms para compensar jitter en la detección de pulsos
+- AC-002.10: Mantiene historial de 18 frames (600ms) para calibración estable del umbral
 
 **Entrada:** Stream de video de cámara trasera  
 **Salida:** Texto decodificado  

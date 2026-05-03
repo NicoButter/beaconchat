@@ -1,8 +1,8 @@
 # Diseño de Arquitectura de Software
 ## BeaconChat - Sistema de Comunicación de Emergencia
 
-**Versión:** 1.0  
-**Fecha:** 6 de diciembre de 2025  
+**Versión:** 2.0  
+**Fecha:** 13 de diciembre de 2025  
 **Autor:** NicoButter  
 **Estado:** Aprobado
 
@@ -547,22 +547,22 @@ class MorseEncoder {
 2. Obtener tabla Morse correspondiente
 3. Para cada carácter:
    a. Buscar en tabla Morse
-   b. Convertir DOT (·) → 150ms ON
-   c. Convertir DASH (—) → 400ms ON
-   d. Agregar GAP inter-símbolo (150ms OFF)
-   e. Agregar GAP inter-letra (400ms OFF)
+   b. Convertir DOT (·) → 200ms ON (mínimo 6 frames a 30fps)
+   c. Convertir DASH (—) → 600ms ON (mínimo 18 frames a 30fps)
+   d. Agregar GAP inter-símbolo (200ms OFF)
+   e. Agregar GAP inter-letra (600ms OFF)
 4. Agregar marcador START al inicio
 5. Agregar marcador END al final
 6. Retornar List<Long> con timings
 ```
 
-**Timing Estándar:**
+**Timing Estándar (v2.0 - optimizado para cámara a 30fps):**
 ```kotlin
-DOT_DURATION = 150L    // ms
-DASH_DURATION = 400L   // ms
-SYMBOL_GAP = 150L      // ms
-LETTER_GAP = 400L      // ms
-WORD_GAP = 800L        // ms
+DOT_DURATION = 200L    // ms (6 frames)
+DASH_DURATION = 600L   // ms (18 frames)
+SYMBOL_GAP = 200L      // ms
+LETTER_GAP = 600L      // ms
+WORD_GAP = 1200L       // ms
 ```
 
 ---
@@ -592,7 +592,10 @@ ImageProxy (30 fps)
     (α = 0.7)
     ↓
 [3] Umbral Dinámico Adaptativo
-    threshold = min + (max - min) × 0.4
+    // Solo si hay suficiente contraste (evita falsos positivos)
+    if (max - min > 30):
+        threshold = min + (max - min) × 0.4
+    historySize = 18 frames (600ms) para calibración estable
     ↓
 [4] Detectar Transiciones
     ON: brightness > threshold
@@ -601,14 +604,15 @@ ImageProxy (30 fps)
 [5] Medir Duración de Pulsos
     timestamp_on → timestamp_off = pulse_duration
     ↓
-[6] Clasificar Pulsos
-    80-200ms   → DOT
-    200-500ms  → DASH
-    >500ms     → GAP
+[6] Clasificar Pulsos (tolerancia ±100ms para compensar jitter)
+    ~200ms (≥6 frames)  → DOT
+    ~600ms (≥18 frames) → DASH
+    >800ms              → GAP
+    <200ms              → Ruido (descartado)
     ↓
 [7] Detectar Marcadores
-    START: 300-300-900ms
-    END: 600-100ms
+    START (LARGO-CORTO-LARGO): ON 800ms → OFF 400ms → ON 800ms → OFF 800ms
+    END: OFF 1000ms → ON 200ms
     ↓
 [8] Decodificar a Texto
     MorseDecoder.decode(symbols)

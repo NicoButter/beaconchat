@@ -1,8 +1,8 @@
 # Documento de Casos de Uso
 ## BeaconChat - Sistema de Comunicación de Emergencia
 
-**Versión:** 1.0  
-**Fecha:** 6 de diciembre de 2025  
+**Versión:** 2.0  
+**Fecha:** 13 de diciembre de 2025  
 **Autor:** NicoButter  
 **Estado:** Aprobado
 
@@ -247,9 +247,9 @@ El usuario necesita enviar una señal de socorro SOS inmediatamente usando todos
 
 ### Notas Adicionales
 - Patrón SOS en Morse: `· · · — — — · · ·` (3 cortos, 3 largos, 3 cortos)
-- Duración total del patrón: ~3.5 segundos
-- Pausa entre repeticiones: 1.5 segundos
-- Total por ciclo: 5 segundos
+- Duración total del patrón: ~7.8 segundos (con timings v2.0: DOT=200ms, DASH=600ms)
+- Pausa entre repeticiones: 2.0 segundos
+- Total por ciclo: ~10 segundos
 
 ---
 
@@ -1024,9 +1024,9 @@ El usuario visualiza la intensidad lumínica en tiempo real y los símbolos Mors
 5. Usuario apunta cámara hacia luz
 6. Sistema detecta cambios de intensidad
 7. Sistema visualiza símbolos en tiempo real:
-   - "DOT" cuando detecta pulso 80-200ms
-   - "DASH" cuando detecta pulso 200-500ms
-   - "GAP" cuando detecta espacio >150ms
+   - "DOT" cuando detecta pulso ~200ms (≥60ms de tolerancia)
+   - "DASH" cuando detecta pulso ~600ms (≥60ms de tolerancia)
+   - "GAP" cuando detecta espacio >400ms
 8. Sistema muestra buffer de símbolos:
    - Ejemplo: "DOT DOT DOT DASH DASH DASH DOT DOT DOT"
 9. Sistema decodifica a letras bajo el gráfico:
@@ -1241,8 +1241,8 @@ Usuario          MainActivity    FlashlightCtrl   VibrationCtrl   SoundCtrl
 ## Apéndice B: Glosario de Términos
 
 - **Callsign:** Identificador único del usuario (3-10 caracteres alfanuméricos)
-- **DOT:** Pulso corto en Morse (150ms)
-- **DASH:** Pulso largo en Morse (400ms)
+- **DOT:** Pulso corto en Morse (200ms)
+- **DASH:** Pulso largo en Morse (600ms)
 - **GAP:** Espacio entre símbolos/letras/palabras
 - **Mesh:** Red descentralizada peer-to-peer
 - **RSSI:** Received Signal Strength Indicator (potencia de señal)
