@@ -23,6 +23,8 @@ Y esa linterna puede gritar por vos.
 - Envía mensajes codificados en **código Morse** con la linterna LED
 - Usa la **vibración** como canal táctil (para personas sepultadas)
 - **Detecta vibraciones** usando el acelerómetro - comunicación sin luz
+- Emite beacons **BLE de emergencia** silenciosos (sin luz ni sonido)
+- **Escanea** señales BLE y ópticas en paralelo en una sola pantalla
 - Permite que **cualquier otro celular** lo lea con su cámara
 - Funciona **100% offline**
 - Incluye tu **última ubicación GPS conocida** (Próximamente)

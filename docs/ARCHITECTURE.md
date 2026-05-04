@@ -24,7 +24,9 @@ Enable communication in disaster scenarios (earthquakes, shipwrecks, blackouts, 
 | **BLE Mesh** | Discovers nearby BeaconChat devices via Bluetooth Low Energy |
 | **Optical Oscilloscope** | Real-time camera waveform for signal debugging/analysis |
 | **Light Radar (LightMap)** | Detects and roughly locates other devices by optical heartbeat |
-| **Emergency Screen** | Fullscreen one-tap SOS/HELP/OK/LOCATION transmission |
+| **Emergency Screen** | Fullscreen one-tap SOS/HELP/OK/LOCATION transmission via any/all channels simultaneously |
+| **BLE Emergency Beacon** | Silent emergency beacon via BLE advertisement (UUID `0000BECE-...`); detected passively by nearby devices |
+| **Signal Scanner** | Unified reception screen: BLE emergency scanning + optical Morse decoding in parallel |
 | **Multi-language Morse** | 9 writing systems: Latin, Cyrillic, Greek, Hebrew, Arabic, Japanese, Korean, Thai, Persian |
 
 ---
@@ -39,6 +41,10 @@ beaconchat/
 │       └── java/com/nicobutter/beaconchat/
 │           ├── MainActivity.kt          # Entry point, navigation hub
 │           ├── data/                    # Persistence layer
+│           ├── domain/                  # Pure domain types: EmergencyType, EmergencyMode, EmergencyState, SignalConfig
+│           ├── emitter/                 # SignalEmitter interface + per-channel implementations
+│           ├── scanner/                 # SignalScanner interface + BleScanner
+│           ├── controller/              # EmergencyManager — multi-channel orchestrator
 │           ├── mesh/                    # Bluetooth LE mesh networking
 │           ├── transceiver/             # Signal encoding, decoding, and hardware controllers
 │           ├── lightmap/                # Optical scanning (oscilloscope + device radar)
@@ -55,6 +61,10 @@ beaconchat/
 | Package | Responsibility |
 |---|---|
 | `data/` | Persists user callsign via AndroidX DataStore |
+| `domain/` | Pure Kotlin enums/data classes with zero Android/Compose dependencies: `EmergencyType`, `EmergencyMode`, `EmergencyState`, `SignalConfig` |
+| `emitter/` | `SignalEmitter` interface + four implementations: `LightEmitter`, `VibrationEmitter`, `SoundEmitter`, `BleEmitter`. Each wraps one hardware channel |
+| `scanner/` | `SignalScanner` interface + `BleScanner` (passive BLE advertisement listener) + `DetectedEmergency` data class |
+| `controller/` | `EmergencyManager` — selects the correct emitters for a given `EmergencyMode`, encodes the message, and starts/stops them all |
 | `mesh/` | BLE advertising, scanning, GATT server/client, chat messaging |
 | `transceiver/` | All signal encoding/decoding logic + hardware controller abstractions |
 | `lightmap/` | Camera-based optical analysis: oscilloscope waveform and peer detection |
@@ -110,6 +120,39 @@ beaconchat/
 |---|---|
 | `UserPreferences` | Wraps AndroidX DataStore. Stores/retrieves user callsign (3–8 chars) and enabled flag as reactive `Flow`s. |
 
+### Domain Package
+
+| Class | Role |
+|---|---|
+| `EmergencyType` | Enum — *what* is communicated: `SOS`, `HELP`, `TRAPPED`, `KIDNAPPED`, `INJURED`, `OK`, `LOCATION`. Carries `morseMessage`, `displayName`, `colorArgb`, and `icon`. No Android/Compose dependency. |
+| `EmergencyMode` | Enum — *how* the signal is sent: `ALL`, `LIGHT`, `VIBRATION`, `SOUND`, `BLE`, `DISCREET`. Each value lists the active channels. |
+| `EmergencyState` | Data class — reactive state snapshot: `isActive`, current `EmergencyType`, current `EmergencyMode`. |
+| `SignalConfig` | Data class — carries the encoded `List<Long>` timing sequence and the `EmergencyType` for emitters to consume. |
+
+### Emitter Package
+
+| Class | Role |
+|---|---|
+| `SignalEmitter` | Interface — `start(config, scope)` / `stop()`. All channel implementations share this contract. |
+| `LightEmitter` | Wraps `FlashlightController`. Starts a coroutine loop toggling the LED torch from `config.timings`. |
+| `VibrationEmitter` | Wraps `VibrationController`. Same timing-loop approach for the haptic motor. |
+| `SoundEmitter` | Wraps `SoundController`. Same timing-loop for the 18.5 kHz `AudioTrack` sine wave. |
+| `BleEmitter` | Advertises a BLE beacon with service UUID `0000BECE-...` and a 1-byte payload encoding the `EmergencyType` ordinal. No Morse timing — the beacon is continuous until `stop()`. |
+
+### Scanner Package
+
+| Class | Role |
+|---|---|
+| `SignalScanner` | Interface — `start()` / `stop()`. Shared contract for all passive listeners. |
+| `BleScanner` | Filters BLE advertisements by `BleEmitter.EMERGENCY_SERVICE_UUID`, decodes the 1-byte `EmergencyType` payload, and publishes `StateFlow<List<DetectedEmergency>>`. |
+| `DetectedEmergency` | Data class — BLE MAC address, decoded `EmergencyType`, RSSI, last-seen timestamp. Helper `signalQuality()` returns Excelente / Buena / Regular / Débil. |
+
+### Controller Package
+
+| Class | Role |
+|---|---|
+| `EmergencyManager` | Central orchestrator. Given an `EmergencyType` and `EmergencyMode`, calls `emittersFor(mode)` to select the right `SignalEmitter`s, encodes the message via `MorseEncoder`, and calls `start()` on each. Exposes `StateFlow<EmergencyState>`. Calling `startEmergency()` while active first calls `stopEmergency()`. |
+
 ### UI Screens
 
 | Screen | Role |
@@ -122,7 +165,8 @@ beaconchat/
 | `VibrationDetectorScreen` | Accelerometer waveform + Morse decode via `VibrationDetector`. |
 | `MeshScreen` | Displays `BLEMeshController` peers and BLE chat. |
 | `SettingsScreen` | Callsign configuration, saved via `UserPreferences`. |
-| `EmergencyTransmissionScreen` | Fullscreen emergency beacon. One-tap SOS/HELP/OK/LOCATION via any or all channels simultaneously. |
+| `EmergencyTransmissionScreen` | Fullscreen emergency beacon. One-tap SOS/HELP/OK/LOCATION via any or all channels simultaneously. Delegates to `EmergencyManager.startEmergency(type, mode)`. |
+| `SignalScannerScreen` | Unified passive reception screen. Runs `BleScanner` (emergency BLE beacons) and optical Morse decoding (`LightDetector` + `MorseDecoder`) in parallel. |
 
 ---
 
@@ -174,6 +218,40 @@ MeshScreen
        ├─ GATT client connects to peer
        ├─ Writes to MESSAGE_CHARACTERISTIC
        └─ _messages StateFlow updated → UI recomposition
+```
+
+### Emergency Transmission: "User taps SOS in EmergencyTransmissionScreen"
+
+```
+EmergencyTransmissionScreen
+  │
+  └─ emergencyManager.startEmergency(EmergencyType.SOS, EmergencyMode.ALL)
+       │
+       ├─ MorseEncoder.encode(type.morseMessage) → List<Long> timings
+       ├─ SignalConfig(timings, type) built
+       │
+       └─ emittersFor(mode) → [LightEmitter, VibrationEmitter, SoundEmitter, BleEmitter]
+            ├─ LightEmitter.start(config, scope)   → coroutine: FlashlightController loop
+            ├─ VibrationEmitter.start(config, scope) → coroutine: VibrationController loop
+            ├─ SoundEmitter.start(config, scope)    → coroutine: SoundController loop
+            └─ BleEmitter.start(config, scope)      → BLE advertisement with EmergencyType byte
+
+  EmergencyManager._state → StateFlow<EmergencyState> → UI recomposition
+```
+
+### Signal Scanning: "SignalScannerScreen is opened"
+
+```
+SignalScannerScreen
+  │
+  ├─ BleScanner.start()                          (DisposableEffect)
+  │    └─ BluetoothLeScanner filters EMERGENCY_SERVICE_UUID
+  │         └─ Decodes 1-byte EmergencyType payload
+  │              └─ _detectedEmergencies StateFlow updated → LazyColumn in UI
+  │
+  └─ CameraX ImageAnalysis → LightDetector
+         └─ isLightOn + durationMs → MorseDecoder.onLightStateChanged()
+                └─ decodedMessage State → Text in UI
 ```
 
 ---
@@ -234,7 +312,6 @@ The protocol is inspired by:
 | **Navigation as a `String` variable** | `currentScreen by mutableStateOf("welcome")` is a fragile, stringly-typed router. No back-stack, no deep-link support. |
 | **`MorseDecoder` is stateful but not scoped** | The decoder holds mutable state (`currentSymbol`, `preambleStage`) but is created with `remember { }` inside a Composable — its state resets if the screen recomposes from scratch. |
 | **`ReceiverScreen` hardcodes Latin Morse** | `MorseDecoder` only decodes Latin alphabet regardless of locale, while `MorseEncoder` supports 9 scripts. |
-
 ### Functionality
 
 | Issue | Impact |
