@@ -31,6 +31,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import com.nicobutter.beaconchat.mesh.DirectBleProtocol
 import com.nicobutter.beaconchat.data.UserPreferences
 import com.nicobutter.beaconchat.mesh.BLEMeshController
 import com.nicobutter.beaconchat.mesh.ChatMessage
@@ -62,6 +66,11 @@ fun MeshScreen(
     val messages by meshController.messages.collectAsState()
     val isAdvertising by meshController.isAdvertising.collectAsState()
     val isScanning by meshController.isScanning.collectAsState()
+    val scanRequested by meshController.scanRequested.collectAsState()
+    val isStartingAdvertising by meshController.isStartingAdvertising.collectAsState()
+    val connectionStatus by meshController.connectionStatus.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumed by remember { mutableStateOf(false) }
     val bluetoothEnabled by meshController.bluetoothEnabled.collectAsState()
 
     val callsign by userPreferences.callsign.collectAsState(initial = "UNKNOWN")
@@ -96,8 +105,8 @@ fun MeshScreen(
     val launcher =
             rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestMultiplePermissions(),
-                    onResult = { perms ->
-                        hasPermissions = perms.values.all { it }
+                    onResult = { _ ->
+                        hasPermissions = permissionsToRequest.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
                         if (hasPermissions) {
                             meshController.updateBluetoothState()
                         }
@@ -107,7 +116,7 @@ fun MeshScreen(
     // Bluetooth enable launcher
     val bluetoothEnableLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+    ) { _ ->
         // Actualizar estado después de intentar activar Bluetooth
         meshController.updateBluetoothState()
     }
@@ -126,28 +135,36 @@ fun MeshScreen(
     // Estado para controlar si el usuario quiere auto-escaneo
     var autoScanEnabled by remember { mutableStateOf(true) }
 
-    // Auto-start SOLO si el usuario tiene auto-scan habilitado
-    // Se agregan chequeos de seguridad adicionales para evitar re-entradas constantes
-    LaunchedEffect(hasPermissions, bluetoothEnabled, autoScanEnabled) {
-        if (hasPermissions && bluetoothEnabled && autoScanEnabled) {
-            if (!isScanning) {
-                meshController.startScanning()
-            }
-            if (!isAdvertising && callsign.isNotBlank()) {
-                meshController.startAdvertising(callsign)
-            }
-        } else if (!autoScanEnabled || !bluetoothEnabled) {
-            // Si el usuario desactivó el auto-scan o el bluetooth, nos aseguramos de detener los procesos
-            meshController.stopScanning()
-            meshController.stopAdvertising()
-        }
+    var visibilityEnabled by remember { mutableStateOf(true) }
+    LaunchedEffect(hasPermissions, bluetoothEnabled, autoScanEnabled, visibilityEnabled, callsign, resumed) {
+        if (hasPermissions && bluetoothEnabled && resumed) {
+            if (autoScanEnabled) meshController.startScanning() else meshController.stopScanning()
+            if (visibilityEnabled) meshController.startAdvertising(callsign) else meshController.stopAdvertising()
+        } else meshController.stop()
     }
 
-    // Cleanup BLE when leaving screen to avoid conflicts with flashlight
-    DisposableEffect(Unit) {
+    DisposableEffect(lifecycleOwner, meshController) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    hasPermissions = permissionsToRequest.all {
+                        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                    }
+                    meshController.resume()
+                    resumed = true
+                }
+                Lifecycle.Event.ON_PAUSE -> { resumed = false; meshController.pause() }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            meshController.resume()
+            resumed = true
+        }
         onDispose {
-            meshController.stopScanning()
-            meshController.stopAdvertising()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            meshController.pause()
         }
     }
 
@@ -163,10 +180,12 @@ fun MeshScreen(
                         },
                 isSending = isSending,
                 lastError = lastError,
+                callsign = callsign,
+                connectionStatus = connectionStatus,
                 onSendMessage = { content ->
                     meshController.sendMessage(selectedPeer!!.id, content, callsign)
                 },
-                onBack = { selectedPeer = null }
+                onBack = { meshController.cancelSend(); selectedPeer = null }
         )
     } else {
         Scaffold(
@@ -244,14 +263,15 @@ fun MeshScreen(
                                     Text(
                                             text =
                                                     if (isAdvertising) "Visible (Anunciando)"
-                                                    else "Invisible",
+                                                    else if (isStartingAdvertising) "Iniciando publicidad/GATT…" else "Invisible",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = if (isAdvertising) Color(0xFF2E7D32) else Color.Gray
                                     )
                                 }
                                 Switch(
-                                        checked = isAdvertising,
+                                        checked = isAdvertising || isStartingAdvertising,
                                         onCheckedChange = { enabled ->
+                                            visibilityEnabled = enabled
                                             if (enabled) {
                                                 meshController.startAdvertising(callsign)
                                             } else {
@@ -274,7 +294,7 @@ fun MeshScreen(
                                             autoScanEnabled = true
                                             meshController.startScanning() 
                                         },
-                                        enabled = hasPermissions && bluetoothEnabled && !isScanning,
+                                        enabled = hasPermissions && bluetoothEnabled && !scanRequested,
                                         modifier = Modifier.weight(1f)
                                 ) {
                                     Icon(Icons.Default.CheckCircle, contentDescription = null)
@@ -287,7 +307,7 @@ fun MeshScreen(
                                             autoScanEnabled = false
                                             meshController.stopScanning() 
                                         },
-                                        enabled = hasPermissions && bluetoothEnabled && isScanning,
+                                        enabled = hasPermissions && bluetoothEnabled && scanRequested,
                                         modifier = Modifier.weight(1f)
                                 ) {
                                     Icon(Icons.Default.Close, contentDescription = null)
@@ -300,6 +320,11 @@ fun MeshScreen(
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
+
+                if (lastError != null) {
+                    Text(lastError!!, color = MaterialTheme.colorScheme.error)
+                }
+                Text(if (isScanning) "Señales BLE detectadas" else if (scanRequested) "Escaneo solicitado; esperando señales" else "Escaneo detenido")
 
                 // Peers List
                 Text(
@@ -350,13 +375,13 @@ fun MeshScreen(
                 } else if (peers.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(
+                            if (scanRequested) CircularProgressIndicator(
                                     modifier = Modifier.size(48.dp),
                                     color = MaterialTheme.colorScheme.secondary
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                    "Escaneando...",
+                                    if (scanRequested) "Esperando señales BLE…" else "Escaneo detenido",
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -448,11 +473,25 @@ fun ChatScreen(
         messages: List<ChatMessage>,
         isSending: Boolean = false,
         lastError: String? = null,
+        callsign: String = "UNKNOWN",
+        connectionStatus: String = "Sin conexión",
         onSendMessage: (String) -> Unit,
         onBack: () -> Unit
 ) {
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val validationError = try {
+        if (messageText.isNotEmpty()) DirectBleProtocol.encode(callsign, messageText)
+        null
+    } catch (e: Exception) { e.message ?: "Texto inválido" }
+    val limit = try { DirectBleProtocol.messageLimit(callsign) } catch (_: Exception) { 0 }
+    var pendingText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(messages) {
+        if (pendingText != null && messages.lastOrNull()?.let { it.isFromMe && it.content == pendingText } == true) {
+            messageText = ""
+            pendingText = null
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -499,6 +538,7 @@ fun ChatScreen(
             },
             bottomBar = {
                 Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(connectionStatus, modifier = Modifier.padding(horizontal = 8.dp))
                     // Mostrar error si hay uno
                     if (lastError != null) {
                         Row(
@@ -532,6 +572,8 @@ fun ChatScreen(
                                 onValueChange = { messageText = it },
                                 modifier = Modifier.weight(1f),
                                 placeholder = { Text("Mensaje...") },
+                                supportingText = { Text(validationError ?: "${messageText.toByteArray(Charsets.UTF_8).size}/$limit bytes UTF-8") },
+                                isError = validationError != null,
                                 shape = RoundedCornerShape(24.dp),
                                 enabled = !isSending
                         )
@@ -539,11 +581,11 @@ fun ChatScreen(
                         IconButton(
                                 onClick = {
                                     if (messageText.isNotBlank()) {
+                                        pendingText = messageText
                                         onSendMessage(messageText)
-                                        messageText = ""
                                     }
                                 },
-                                enabled = messageText.isNotBlank() && !isSending,
+                                enabled = messageText.isNotBlank() && validationError == null && !isSending,
                                 colors =
                                         IconButtonDefaults.iconButtonColors(
                                                 containerColor = MaterialTheme.colorScheme.primary,
@@ -598,6 +640,7 @@ fun MessageBubble(message: ChatMessage) {
                         color = textColor.copy(alpha = 0.7f)
                 )
             }
+            if (message.isFromMe) Text("Escritura GATT confirmada · sin ACK", style = MaterialTheme.typography.labelSmall)
             Text(
                     text = message.content,
                     style = MaterialTheme.typography.bodyMedium,
