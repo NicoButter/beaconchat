@@ -1,7 +1,7 @@
 # 07 · Roadmap y puertas de validación
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../../LICENSE) · Borrador para revisión · 16/10/2026**
-[Índice](../README.md) · [Validación](06-validacion.md) · [Trazabilidad](10-trazabilidad.md)
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+[Índice](../README.md) · [Validación](Validacion-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
 
 ## Etapas propuestas
 

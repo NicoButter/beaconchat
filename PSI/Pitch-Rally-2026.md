@@ -1,7 +1,7 @@
 # 09 · Storyboard y pitch para adaptar
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../../LICENSE) · Borrador para revisión · 16/10/2026**
-[Índice](../README.md) · [Guía del Rally](00-guia-rally.md) · [Reporte](08-guia-reporte-pautado.md)
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+[Índice](../README.md) · [Guía del Rally](Guia-Rally-2026.md) · [Reporte](Reporte-Pautado-Rally-2026.md)
 
 ## Uso y duración
 

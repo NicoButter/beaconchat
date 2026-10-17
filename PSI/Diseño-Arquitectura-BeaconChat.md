@@ -1,1405 +1,270 @@
-# Diseño de Arquitectura de Software
-## BeaconChat - Sistema de Comunicación de Emergencia
+# 04 · Arquitectura actual y propuesta
 
-**Versión:** 2.0  
-**Fecha:** 13 de diciembre de 2025  
-**Autor:** NicoButter  
-**Estado:** Aprobado
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+[Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Casos de uso](Casos-de-Uso-BeaconChat.md)
+
+## Base verificable y fuentes locales
+
+Lectura del commit `2e754e315a40533e9b3f61a0a2a292d2db9b96a2` de `main`. Las rutas siguientes sustentan el estado; el nombre `BLEMeshController` o `LightMapScreen` no demuestra mesh multisalto ni mapas geográficos.
+
+| Fuente | Evidencia |
+| --- | --- |
+| [MainActivity](../app/src/main/java/com/nicobutter/beaconchat/MainActivity.kt), [MeshScreen](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/MeshScreen.kt) | Activity/Composables, coordinación de controladores, permisos y ciclo de vida. MainActivity deriva de ComponentActivity; no se identifica como una clase ViewModel. |
+| [BLEMeshController](../app/src/main/java/com/nicobutter/beaconchat/mesh/BLEMeshController.kt), [DirectBleProtocol](../app/src/main/java/com/nicobutter/beaconchat/mesh/DirectBleProtocol.kt) | Advertising/scanning y cliente/servidor GATT directo; máximo 20 bytes totales. |
+| [MeshMessage](../app/src/main/java/com/nicobutter/beaconchat/mesh/core/MeshMessage.kt), [MeshEngine](../app/src/main/java/com/nicobutter/beaconchat/mesh/core/MeshEngine.kt) | Modelo lógico, TTL, dedupe y cola; no hay serializer BLE, tareas de red ni persistencia. |
+| [Pruebas de topologías](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshTopologyTest.kt), [red simulada](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/SimulatedNetwork.kt) | Transporte simulado JVM; no uso del stack Bluetooth físico. |
+| [EmergencyManager](../app/src/main/java/com/nicobutter/beaconchat/controller/EmergencyManager.kt), [BleEmitter](../app/src/main/java/com/nicobutter/beaconchat/emitter/BleEmitter.kt), [BleScanner](../app/src/main/java/com/nicobutter/beaconchat/scanner/BleScanner.kt) | Orquestación de señales y beacon SOS con un byte de tipo de emergencia. No transmite incidente ni coordenadas. |
+| [Transmisor](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/TransmitterScreen.kt), [receptor QR](../app/src/main/java/com/nicobutter/beaconchat/transceiver/QRScanner.kt), [detectores](../app/src/main/java/com/nicobutter/beaconchat/transceiver/LightDetector.kt) | Componentes ópticos/Morse, QR y otros canales locales, con validación física insuficiente. |
+| [UserPreferences](../app/src/main/java/com/nicobutter/beaconchat/data/UserPreferences.kt) | Callsign en DataStore; no repositorio durable de SOS. |
+| [Gradle de app](../app/build.gradle.kts), [manifiesto](../app/src/main/AndroidManifest.xml) | SDK 24/34, BLE y permisos. Ubicación hasta API 30 para scan BLE; sin permiso INTERNET ni servicio de incidentes. |
+| [Informe BLE](Validacion-BeaconChat.md), [informe del núcleo](Validacion-BeaconChat.md) | Resultados históricos reportados; no se reinterpretan como ensayos nuevos. |
+
+El `LocationManager` del controlador BLE solo comprueba proveedores habilitados para escaneo en Android anterior a 12. Esa comprobación no obtiene ni georreferencia un incidente. El análisis de fuentes no encontró componentes de GNSS para SOS, API/backend, mapas, LoRa, fragmentación del envelope o integración entre MeshEngine y BLE.
+
+## Arquitectura AS-IS
+
+```mermaid
+flowchart TB
+    UI["E: MainActivity y pantallas Compose"] --> EM["E: EmergencyManager"]
+    UI --> BC["E: BLEMeshController"]
+    UI --> RX["E: recepción y análisis local"]
+    UI --> PREF["E: UserPreferences / DataStore"]
+    EM --> SIG["E: luz, vibración, audio y beacon SOS"]
+    RX --> SENSOR["E: CameraX, acelerómetro, QR y BLE scanner"]
+    BC --> RADIO["E: advertising, scan y GATT A-B"]
+    CORE["S: MeshEngine y MeshMessage<br/>lógica sin Android"] --> TEST["S: SimulatedNetwork / tests JVM"]
+    CORE -. "sin integración" .-> BC
+```
+
+La separación es descriptiva de componentes reales, no una declaración de Clean Architecture/MVVM completo. El chat guarda peers/mensajes en memoria. Los controladores se detienen según navegación/pausa; no existe un servicio probado que sostenga la futura mesh con pantalla bloqueada.
+
+### Transporte directo y núcleo lógico
+
+El paquete directo es UTF-8 estricto `CALLSIGN:MENSAJE`: **20 bytes totales**, callsign de hasta 8 bytes y un separador. Con callsign de 8 bytes quedan 11 para texto; caracteres y bytes no son equivalentes. Cabe en el MTU ATT mínimo de 23, con 3 bytes de overhead ATT. No negocia un canal de 512 bytes ni fragmenta.
+
+El callback de escritura GATT solo confirma esa operación; no lectura, ACK de aplicación, recepción central ni rescate. La aceptación de `MeshTransport` solo confirma handoff local. El producto no implementa Bluetooth Mesh Profile.
+
+| Propiedad de MeshEngine | Comportamiento actual S |
+| --- | --- |
+| Identidad | NodeId y MessageId UUID; key `(originId, messageId)`, nunca MAC/callsign |
+| Modelo | Versión 1, destino opcional (`null` broadcast), texto y saltos restantes |
+| TTL | Predeterminado máximo 16; decrementa al encolar cada copia de transmisión; en cero puede entregar localmente, no reenviar |
+| Dedupe | 256 keys por defecto, 120 s; una key expirada puede volver a admitirse |
+| Cola | 64 mensajes FIFO por defecto, 30 s de retención; llena rechaza el reenvío nuevo |
+| Contenido | Hasta 1024 bytes UTF-8; no define tamaño de frame BLE |
+| Despacho | Un intento por item; lo retira incluso con transporte no disponible o excepción; sin reintento automático |
+| Host | Debe serializar llamadas y suministrar reloj monotónico local; sin threads/timers/background propios |
+
+La deduplicación es temporal, no exactamente-una-vez durable. No hay store-and-forward/DTN persistente en ese núcleo. Sus límites no son parámetros de capacidad ya validados para una catástrofe.
+
+## Arquitectura TO-BE, íntegramente propuesta
+
+```mermaid
+flowchart TB
+    subgraph PHONE["P: teléfono origen"]
+        SOS["UI SOS y permisos"] --> LOC["Proveedor GNSS / alternativa manual"]
+        LOC --> DOM["Registro SOS mínimo"]
+        DOM --> AD["Serialización, protección y adaptador mesh"]
+        DOM -. "E4" .-> STORE["Custodia durable con expiración"]
+    end
+    AD -->|"BLE P"| B["P: nodo B retransmisor"]
+    B -->|"BLE P"| C["P: nodo C retransmisor"]
+    C -->|"BLE P"| D["P: nodo D gateway dinámico"]
+    D -->|"HTTPS autenticado P"| API["P: API central"]
+    API --> DB["P: incidentes y comprobantes durables"]
+    DB --> OPS["P: centro de operaciones<br/>lista, mapa y clasificación humana"]
+    EXT["P opcional: radio / gateway LoRa externo"] -. "E5, complemento" .-> D
+```
+
+Cada teléfono compatible podría ser origen/retransmisor/gateway según conectividad y política. El gateway exige acceso real a la API, no solo señal Wi-Fi. El centro inicial será de laboratorio, sin enlace a servicios oficiales. El mapa es una vista del centro; obtener coordenadas GNSS no requiere tener un mapa en la app.
+
+### Integración, seguridad y presupuesto de bytes
+
+Se propone conservar el chat directo y negociar una capacidad/versión mesh en un canal separado. Antes de implementar se deben definir formato, tamaños y pruebas. El mensaje rico excederá el presupuesto directo con UUID, tiempos, posición y protección; no se enviará como texto truncado en `CALLSIGN:MENSAJE`.
+
+Como antecedente de cálculo, el [informe del núcleo](Validacion-BeaconChat.md) estima un envelope lógico binario unicast de **53 + L bytes**: con `HOLA` serían 57, aun sin ubicación ni criptografía. Es un ejemplo de diseño, no un serializer existente. El presupuesto SOS deberá sumar cabeceras, metadatos, autenticación y cifrado. Fragmentación necesita índices, cantidad, longitud total, integridad, timeout y cuotas por peer/globales; la pérdida de un fragmento no autoriza entregar una carga parcial al núcleo.
+
+El adaptador asíncrono necesitará backpressure y coordinación serializada con MeshEngine; descontará TTL una vez por salto lógico, no por fragmento. No podrá asumir que su puerto síncrono equivale a recepción por Bluetooth. Se evaluarán pruebas con peers legados y fallos parciales antes de conectar la UI.
+
+Se propone un cuerpo SOS inmutable protegido hasta el centro, con metadatos mínimos de tránsito separados. El TTL mutable requiere reglas y controles antiabuso propios: proteger el cuerpo no impide que un nodo malicioso intente restaurar TTL. Identidad lógica no equivale a autenticación. Provisión/revocación de claves, cifrado offline hacia el centro y autenticación de emisores no están resueltos ni se elige aquí un protocolo criptográfico ad hoc.
+
+### Secuencia normal propuesta
+
+```mermaid
+sequenceDiagram
+    actor V as Persona
+    participant A as A origen P
+    participant GPS as GNSS local
+    participant B as B relay P
+    participant C as C relay P
+    participant D as D gateway P
+    participant API as API P
+    participant DB as DB P
+    actor O as Operador
+    V->>A: Registrar SOS y permisos
+    A->>GPS: Intentar fix<br/>con espera acotada
+    GPS-->>A: Posicion, precision<br/>y captura
+    A->>A: Crear ID y cuerpo SOS
+    A->>B: Envelope BLE<br/>fragmentado, futuro
+    B->>C: Reensamblar,<br/>dedupe y TTL
+    C->>D: Reenviar mismo SOS
+    D->>API: HTTPS autenticado<br/>y clave idempotente
+    API->>DB: Guardar o recuperar<br/>incidente unico
+    DB-->>API: Persistencia<br/>confirmada
+    API-->>D: Comprobante central<br/>correlacionado
+    Note over A,D: Origen sin confirmar hasta recibir<br/>comprobante verificable
+    D-->>C: Retorno mesh propuesto<br/>del comprobante
+    C-->>B: Retorno si hay enlaces
+    B-->>A: Retorno si hay enlaces
+    A-->>V: Recepcion central,<br/>si se verifico
+    O->>API: Consultar y clasificar con rol
+    Note over V,O: Recepcion no significa lectura,<br/>despacho ni rescate
+```
+
+El retorno de comprobantes es una decisión de protocolo futura y puede fallar por movilidad. No está resuelto por el GATT directo ni por el núcleo actual. El centro puede recibir aunque A no llegue a enterarse.
+
+### Secuencia de fallos y recuperación propuesta
+
+```mermaid
+sequenceDiagram
+    actor V as Persona
+    participant A as Origen futuro
+    participant B as Vecino futuro
+    participant D as Gateway futuro
+    participant API as API futura
+    V->>A: Solicitar SOS
+    A->>A: GNSS no disponible o permiso denegado
+    A-->>V: Reciente rotulada, manual o sin ubicacion
+    alt Sin vecinos
+        A-->>V: Sin enlace, recepcion central sin confirmar
+        opt Custodia durable E4 implementada
+            A->>A: Guardar con cuota y vencimiento
+        end
+    else Hay vecinos pero no salida
+        A->>B: SOS valido
+        B->>D: Reenvio logico futuro
+        D->>API: Intentar HTTPS
+        API--xD: Sin respuesta o conectividad perdida
+        Note over A,D: No mostrar confirmacion central por ACK GATT
+        opt Recuperacion durable E4 implementada
+            D->>D: Guardar, esperar, no restaurar TTL sin limite
+            D->>API: Reintentar mismo ID al volver Internet
+            API-->>D: Guardado previo o nuevo, mismo incidente
+        end
+    end
+```
+
+## Modelo conceptual de datos propuesto
+
+Este modelo no existe como clases de incidentes, esquema SQL ni API en el repositorio. Es una base de discusión; el formato lógico actual solo tiene los campos de MeshMessage descritos arriba.
+
+| Entidad / campo | Semántica y validación propuesta |
+| --- | --- |
+| SOS: `originId`, `messageId` | Identidad estable compuesta, usada en dedupe/transporte y como clave idempotente central; un reintento no crea otro ID |
+| SOS: `schemaVersion`, `emergencyType` | Versión y catálogo explícito; no asumir que ordinal interno de enum sea contrato público estable |
+| SOS: `createdAt` | Momento declarado de creación; marcar incertidumbre del reloj civil, no prueba de autenticidad |
+| SOS: `declaredSeverity`, `note` | Gravedad declarada y nota breve opcional, con longitud UTF-8 acotada antes de ensayar; sin nombres/documentos obligatorios |
+| Location: `source`, coordenadas opcionales | `gnss`, `lastKnown`, `manual` o `unavailable`; latitud −90..90 y longitud −180..180 cuando existan; no usar valores por defecto como posición |
+| Location: `accuracyM`, `capturedAt`, `ageAtCreationMs` | Precisión estimada si la fuente la provee, momento de captura y edad calculada localmente; dato desconocido explícito. Posición manual no recibe precisión GNSS ficticia |
+| Location: `manualReference` | Descripción opcional de lugar, sin geocodificación inventada; puede existir sin coordenadas |
+| Tránsito: `hopsRemaining`, versión y fragmentos | Metadatos por enlace, separados del cuerpo inmutable. Número de saltos no es tiempo de vida |
+| Custodia E4: vencimiento, intentos, próxima ejecución | Persistencia local protegida, cuotas y política durable; no son los 30 s de cola actuales |
+| Incident: `incidentId`, `receivedAt`, estado | ID interno central, referencia al SOS único, hora del servidor y ciclo de atención humana separado del transporte |
+| Receipt: clave SOS, `receivedAt`, comprobante | Respuesta verificable de persistencia; no es ACK GATT ni orden de rescate |
+| Review: operador, tiempo, clasificación | Cambio autorizado/auditable; gravedad revisada distinguible de la declarada |
+
+```mermaid
+erDiagram
+    NODE ||--o{ SOS : origina
+    SOS ||--o| LOCATION : describe
+    SOS ||--o{ CUSTODY : conserva
+    SOS ||--o| INCIDENT : registra
+    INCIDENT ||--o{ RECEIPT : confirma
+    INCIDENT ||--o{ REVIEW : recibe
+    OPERATOR ||--o{ REVIEW : realiza
+    NODE {
+        uuid originId PK
+    }
+    SOS {
+        uuid originId PK
+        uuid messageId PK
+        int schemaVersion
+        string emergencyType
+        datetime createdAt
+        string declaredSeverity
+        string note
+    }
+    LOCATION {
+        string source
+        float latitude
+        float longitude
+        float accuracyM
+        datetime capturedAt
+        long ageAtCreationMs
+        string manualReference
+    }
+    CUSTODY {
+        uuid holderNodeId
+        datetime expiresAt
+        int attempts
+    }
+    INCIDENT {
+        uuid incidentId PK
+        datetime receivedAt
+        string status
+    }
+    RECEIPT {
+        uuid receiptId PK
+        datetime receivedAt
+    }
+    OPERATOR {
+        uuid operatorId PK
+        string role
+    }
+    REVIEW {
+        datetime reviewedAt
+        string classification
+    }
+```
+
+SOS→INCIDENT es 0..1 mientras todavía no hubo llegada central; la unicidad es por clave compuesta SOS, con transacción persistente. El gráfico no expresa nulabilidad de atributos: coordenadas/calidad pueden faltar. En la carga se incluirá el estado explícito `unavailable` cuando corresponda. Nuevos datos de posición o cancelación requerirán eventos/revisiones correlacionadas diseñadas por separado; no se muta silenciosamente un SOS deduplicado.
+
+La edad de ubicación aumenta durante el tránsito. La API debe conservar edad al crear, captura declarada y recepción de servidor, e indicar incertidumbre temporal; relojes de teléfonos distintos pueden discrepar. El reloj monotónico del núcleo es local, no sincroniza los tiempos civiles del SOS.
+
+## Estados y decisiones abiertas
+
+```mermaid
+stateDiagram-v2
+    [*] --> Registrado
+    Registrado --> EnTransito: enlace disponible
+    Registrado --> SinSalida: no hay vecino
+    EnTransito --> SinSalida: fallo o falta de salida
+    SinSalida --> Guardado: solo custodia durable E4
+    Guardado --> EnTransito: reintento acotado
+    Guardado --> Expirado: vencimiento
+    SinSalida --> Fallido: sin custodia o politica agotada
+    EnTransito --> ConfirmadoCentral: comprobante valido recibido
+    ConfirmadoCentral --> [*]
+    Fallido --> [*]
+    Expirado --> [*]
+```
+
+Es la vista de conocimiento de un nodo, no el estado global del rescate. El centro puede tener el incidente aunque el emisor permanezca sin confirmar. Los estados centrales de clasificación/asignación/atención son otro ciclo futuro, con responsables y reglas propias.
+
+| Decisión de diseño | Propuesta y consecuencia | Pendiente antes de código/operación |
+| --- | --- | --- |
+| AD-01 · BLE como cadena mínima | Reutilizar componentes, separar chat legado y mesh; no requerir LoRa | Negociación, serialización, fragmentos, límites y ensayos |
+| AD-02 · Ubicación honesta | GNSS independiente de Internet; manual/sin fix permitidos | Espera máxima, umbral de dato reciente, política de precisión |
+| AD-03 · Confirmar solo persistencia | Comprobante autenticable y dedupe central | Contrato API, errores, retorno mesh y conflicto de mismo ID |
+| AD-04 · Custodia separada del núcleo | No convertir FIFO temporal en promesa DTN | Retención, cuotas, recuperación, TTL e idempotencia tras reinicio |
+| AD-05 · Datos mínimos protegidos | Relays sin acceso innecesario a coordenadas/notas | Amenazas, claves offline, revocación, consentimiento y acceso |
+| AD-06 · Centro de laboratorio primero | Clasificación humana, datos sintéticos; mapas solo si hay datos válidos | Responsable de operación, licencias cartográficas, integración oficial futura |
+
+Son propuestas de esta edición, no ADR históricos aprobados. No se añaden dependencias, permisos, servicios ni módulos en esta intervención.
+
 
 ---
 
-## Tabla de Contenidos
+## Referencia de arquitectura previa
 
-1. [Introducción](#1-introducción)
-2. [Visión Arquitectónica](#2-visión-arquitectónica)
-3. [Arquitectura del Sistema](#3-arquitectura-del-sistema)
-4. [Vistas Arquitectónicas](#4-vistas-arquitectónicas)
-5. [Componentes Principales](#5-componentes-principales)
-6. [Patrones de Diseño](#6-patrones-de-diseño)
-7. [Flujo de Datos](#7-flujo-de-datos)
-8. [Decisiones Arquitectónicas](#8-decisiones-arquitectónicas)
-9. [Diagrama de Despliegue](#9-diagrama-de-despliegue)
-
----
-
-## 1. Introducción
-
-### 1.1 Propósito
-Este documento describe la arquitectura de software de BeaconChat, definiendo la estructura de alto nivel del sistema, sus componentes principales, las relaciones entre ellos y los principios de diseño que guían su implementación.
-
-### 1.2 Alcance
-El documento cubre:
-- Arquitectura general del sistema
-- Organización de capas y componentes
-- Patrones arquitectónicos aplicados
-- Interfaces entre componentes
-- Flujos de datos principales
-
-### 1.3 Audiencia
-- Desarrolladores del equipo
-- Arquitectos de software
-- Revisores técnicos
-- Mantenedores del sistema
-
-### 1.4 Referencias
-- ERS-BeaconChat.md v1.0
-- Casos-de-Uso-BeaconChat.md v1.0
-- Android Architecture Components
-- Clean Architecture (Robert C. Martin)
-- MVVM Pattern Documentation
-
----
-
-## 2. Visión Arquitectónica
-
-### 2.1 Objetivos Arquitectónicos
-
-#### 2.1.1 Separación de Responsabilidades
-- **UI separada de lógica:** Jetpack Compose para UI declarativa
-- **Lógica de negocio independiente:** Controladores reutilizables
-- **Datos aislados:** Capa de persistencia dedicada
-
-#### 2.1.2 Modularidad
-- Componentes independientes y reemplazables
-- Acoplamiento bajo entre módulos
-- Alta cohesión dentro de módulos
-
-#### 2.1.3 Testabilidad
-- Inyección de dependencias implícita
-- Componentes fácilmente mockeables
-- Separación de UI y lógica
-
-#### 2.1.4 Mantenibilidad
-- Código organizado por funcionalidad
-- Documentación inline exhaustiva
-- Convenciones de código consistentes
-
-#### 2.1.5 Rendimiento
-- Operaciones asíncronas con Coroutines
-- Gestión eficiente de recursos hardware
-- Liberación automática de recursos
-
-### 2.2 Restricciones Arquitectónicas
-
-#### 2.2.1 Plataforma
-- Android API 26+ (Android 8.0 Oreo)
-- Kotlin como lenguaje principal (100%)
-- Jetpack Compose para UI
-
-#### 2.2.2 Hardware
-- Dependencia de sensores/actuadores físicos
-- Gestión cuidadosa de recursos limitados (batería)
-- Sin conectividad de red requerida
-
-#### 2.2.3 Concurrencia
-- Single Activity con múltiples Composables
-- Coroutines para operaciones asíncronas
-- StateFlow para estado reactivo
-
----
-
-## 3. Arquitectura del Sistema
-
-### 3.1 Estilo Arquitectónico Principal
-
-**Patrón: MVVM (Model-View-ViewModel) con Clean Architecture**
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      PRESENTATION LAYER                      │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Jetpack Compose UI (Views)                   │   │
-│  │  • Screens (Composables)                             │   │
-│  │  • Theme & Styling                                   │   │
-│  │  • Navigation                                        │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                            ▲                                 │
-│                            │ State & Events                  │
-│                            ▼                                 │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │            MainActivity (ViewModel)                   │   │
-│  │  • State Management                                   │   │
-│  │  • Navigation Logic                                   │   │
-│  │  • Lifecycle Awareness                                │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                            ▲
-                            │ Use Cases
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       DOMAIN LAYER                           │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │              Controllers (Business Logic)             │   │
-│  │  • FlashlightController                              │   │
-│  │  • VibrationController                               │   │
-│  │  • SoundController                                   │   │
-│  │  • BLEMeshController                                 │   │
-│  │  • LightScanner / LightDetector                      │   │
-│  │  • VibrationOscilloscope                             │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                            ▲                                 │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │         Encoders / Decoders (Core Logic)             │   │
-│  │  • MorseEncoder / MorseDecoder                       │   │
-│  │  • BinaryEncoder / BinaryDecoder                     │   │
-│  │  • MorseAlphabet (Multi-language)                    │   │
-│  │  • QRGenerator / QRScanner                           │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                            ▲
-                            │ Data Access
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        DATA LAYER                            │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │              Data Sources                             │   │
-│  │  • UserPreferences (DataStore/SharedPreferences)     │   │
-│  │  • MeshPeer (In-Memory)                              │   │
-│  │  • ChatMessage (In-Memory)                           │   │
-│  │  • DetectedDevice (In-Memory)                        │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                            ▲
-                            │ Hardware Abstraction
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   HARDWARE ABSTRACTION LAYER                 │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │           Android Framework APIs                      │   │
-│  │  • Camera2 / CameraX                                 │   │
-│  │  • Vibrator / VibratorManager                        │   │
-│  │  • AudioTrack                                        │   │
-│  │  • SensorManager (Accelerometer)                     │   │
-│  │  • BluetoothAdapter / BluetoothGatt                  │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 3.2 Capas de la Arquitectura
-
-#### Capa de Presentación (Presentation Layer)
-**Responsabilidad:** Interfaz de usuario y manejo de interacciones
-
-**Componentes:**
-- **Composables (Screens):** Interfaces declarativas en Jetpack Compose
-- **MainActivity:** Punto de entrada y coordinador de navegación
-- **Theme:** Definiciones de colores, tipografía y estilos Material Design 3
-
-**Tecnologías:**
-- Jetpack Compose
-- Material Design 3
-- Navigation Component
-
----
-
-#### Capa de Dominio (Domain Layer)
-**Responsabilidad:** Lógica de negocio y casos de uso
-
-**Componentes:**
-- **Controllers:** Gestión de hardware y operaciones complejas
-- **Encoders/Decoders:** Transformación de datos (texto ↔ Morse ↔ binario)
-- **Business Logic:** Algoritmos de detección, filtrado y procesamiento
-
-**Características:**
-- Sin dependencias de Android Framework (donde es posible)
-- Lógica pura y testeable
-- Reutilizable
-
----
-
-#### Capa de Datos (Data Layer)
-**Responsabilidad:** Persistencia y gestión de estado
-
-**Componentes:**
-- **UserPreferences:** Configuración persistente del usuario
-- **In-Memory State:** Estado temporal de sesión (mensajes, peers)
-
-**Tecnologías:**
-- SharedPreferences / DataStore
-- Kotlin StateFlow
-- Data Classes
-
----
-
-#### Capa de Abstracción de Hardware (HAL)
-**Responsabilidad:** Interfaz con hardware del dispositivo
-
-**Componentes:**
-- APIs de Android Framework
-- Drivers de sensores/actuadores
-
----
-
-## 4. Vistas Arquitectónicas
-
-### 4.1 Vista Lógica
-
-#### 4.1.1 Diagrama de Paquetes
-
-```
-com.nicobutter.beaconchat/
-│
-├── MainActivity.kt                    [Entry Point & Navigation]
-│
-├── ui/                                [Presentation Layer]
-│   ├── screens/
-│   │   ├── WelcomeScreen.kt           [Pantalla inicial]
-│   │   ├── TransmitterScreen.kt       [Transmisión de mensajes]
-│   │   ├── ReceiverScreen.kt          [Recepción de mensajes]
-│   │   ├── EmergencyTransmissionScreen.kt [SOS/HELP]
-│   │   ├── MeshScreen.kt              [Red Bluetooth]
-│   │   ├── LightMapScreen.kt          [Radar de dispositivos]
-│   │   ├── OscilloscopeScreen.kt      [Visualización luz]
-│   │   ├── VibrationDetectorScreen.kt [Detección vibración]
-│   │   ├── QRTransmissionScreen.kt    [Generación QR]
-│   │   └── SettingsScreen.kt          [Configuración]
-│   └── theme/
-│       ├── Color.kt                   [Paleta de colores]
-│       ├── Theme.kt                   [Tema Material Design]
-│       └── Type.kt                    [Tipografía]
-│
-├── transceiver/                       [Domain Layer - Codificación]
-│   ├── MorseEncoder.kt                [Text → Morse timings]
-│   ├── MorseDecoder.kt                [Morse → Text]
-│   ├── MorseAlphabet.kt               [9 alfabetos internacionales]
-│   ├── BinaryEncoder.kt               [Text → ASCII binario]
-│   ├── BinaryDecoder.kt               [ASCII binario → Text]
-│   ├── FlashlightController.kt        [Control LED]
-│   ├── VibrationController.kt         [Control motor háptico]
-│   ├── SoundController.kt             [Generación tonos]
-│   ├── LightDetector.kt               [Análisis frames cámara]
-│   ├── VibrationOscilloscope.kt       [Análisis acelerómetro]
-│   ├── QRGenerator.kt                 [Generación QR codes]
-│   └── QRScanner.kt                   [Lectura QR codes]
-│
-├── mesh/                              [Domain Layer - Networking]
-│   ├── BLEMeshController.kt           [Bluetooth LE mesh]
-│   ├── MeshPeer.kt                    [Modelo de peer]
-│   └── ChatMessage.kt                 [Modelo de mensaje]
-│
-├── lightmap/                          [Domain Layer - Radar]
-│   ├── LightScanner.kt                [Escaneo de luces]
-│   ├── DetectedDevice.kt              [Modelo de dispositivo]
-│   ├── HeartbeatPattern.kt            [Patrón heartbeat]
-│   └── OpticalOscilloscope.kt         [Osciloscopio óptico]
-│
-└── data/                              [Data Layer]
-    └── UserPreferences.kt             [Persistencia configuración]
-```
-
-#### 4.1.2 Relaciones entre Componentes
-
-```
-┌─────────────────┐         ┌──────────────────┐
-│ TransmitterScreen│─────────│ FlashlightController│
-└─────────────────┘         └──────────────────┘
-         │                           │
-         │                           │
-         ▼                           ▼
-┌─────────────────┐         ┌──────────────────┐
-│  MorseEncoder   │         │  Camera2 API     │
-└─────────────────┘         └──────────────────┘
-         │
-         │
-         ▼
-┌─────────────────┐
-│ MorseAlphabet   │
-└─────────────────┘
-```
-
-### 4.2 Vista de Procesos
-
-#### 4.2.1 Diagrama de Flujo: Transmisión de Mensaje
-
-```
-┌─────────────┐
-│   Usuario   │
-│ escribe "SOS"│
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────────┐
-│ TransmitterScreen   │
-│ • Valida input      │
-│ • Detecta alfabeto  │
-└──────┬──────────────┘
-       │
-       ▼
-┌─────────────────────┐
-│   MorseEncoder      │
-│ • encode(text)      │
-│ • Returns timings[] │
-└──────┬──────────────┘
-       │
-       ▼
-┌─────────────────────┐
-│FlashlightController │
-│ • transmit(timings) │
-│ • Loop async        │
-└──────┬──────────────┘
-       │
-       ▼
-┌─────────────────────┐
-│   Camera2 API       │
-│ • setTorchMode(ON)  │
-│ • delay(duration)   │
-│ • setTorchMode(OFF) │
-└─────────────────────┘
-```
-
-#### 4.2.2 Diagrama de Flujo: Recepción de Mensaje
-
-```
-┌─────────────┐
-│   Usuario   │
-│ abre cámara │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────────┐
-│  ReceiverScreen     │
-│ • Inicia cámara     │
-│ • Callback frames   │
-└──────┬──────────────┘
-       │
-       ▼
-┌─────────────────────┐
-│   LightDetector     │
-│ • analyze(frame)    │
-│ • calcBrightness()  │
-│ • applyFilter()     │
-│ • detectPulses()    │
-└──────┬──────────────┘
-       │
-       ▼
-┌─────────────────────┐
-│   MorseDecoder      │
-│ • classifyPulse()   │
-│ • DOT/DASH/GAP      │
-│ • decode()          │
-└──────┬──────────────┘
-       │
-       ▼
-┌─────────────────────┐
-│      UI Update      │
-│ • Show message      │
-│ • Play sound        │
-└─────────────────────┘
-```
-
-### 4.3 Vista de Desarrollo
-
-#### 4.3.1 Estructura de Directorios
-
-```
-beaconchat/
-├── app/
-│   ├── build.gradle.kts              [Configuración build]
-│   ├── proguard-rules.pro            [Ofuscación]
-│   └── src/
-│       ├── main/
-│       │   ├── AndroidManifest.xml   [Permisos y metadata]
-│       │   ├── java/com/nicobutter/beaconchat/
-│       │   │   ├── MainActivity.kt
-│       │   │   ├── ui/
-│       │   │   ├── transceiver/
-│       │   │   ├── mesh/
-│       │   │   ├── lightmap/
-│       │   │   └── data/
-│       │   └── res/
-│       │       ├── drawable/          [Iconos vectoriales]
-│       │       ├── values/
-│       │       │   ├── colors.xml
-│       │       │   ├── strings.xml
-│       │       │   └── themes.xml
-│       │       └── xml/
-│       ├── androidTest/              [Tests instrumentados]
-│       └── test/                     [Unit tests]
-├── gradle/
-│   ├── libs.versions.toml            [Catálogo de dependencias]
-│   └── wrapper/
-├── build.gradle.kts                  [Build raíz]
-├── settings.gradle.kts               [Configuración proyecto]
-├── Makefile                          [Scripts de build]
-├── deploy-to-phone.sh                [Script despliegue]
-├── README.md
-└── PSI/                              [Documentación]
-    ├── ERS-BeaconChat.md
-    ├── Casos-de-Uso-BeaconChat.md
-    └── Diseño-Arquitectura.md
-```
-
-### 4.4 Vista Física (Despliegue)
-
-```
-┌─────────────────────────────────────────┐
-│      Dispositivo Android Físico         │
-│  ┌───────────────────────────────────┐  │
-│  │   Android OS (API 26-34)          │  │
-│  │  ┌─────────────────────────────┐  │  │
-│  │  │   BeaconChat APK            │  │  │
-│  │  │  • Dalvik/ART Runtime       │  │  │
-│  │  │  • Jetpack Compose UI       │  │  │
-│  │  └─────────────────────────────┘  │  │
-│  │           ▲         ▲              │  │
-│  │           │         │              │  │
-│  │  ┌────────┴───┐ ┌──┴──────────┐   │  │
-│  │  │ Hardware   │ │ Data Storage│   │  │
-│  │  │ • Camera   │ │• SharedPrefs│   │  │
-│  │  │ • LED      │ └─────────────┘   │  │
-│  │  │ • Vibrator │                    │  │
-│  │  │ • Bluetooth│                    │  │
-│  │  │ • Sensors  │                    │  │
-│  │  └────────────┘                    │  │
-│  └───────────────────────────────────┘  │
-└─────────────────────────────────────────┘
-```
-
----
-
-## 5. Componentes Principales
-
-### 5.1 MainActivity
-
-**Propósito:** Coordinador principal y gestor de navegación
-
-**Responsabilidades:**
-- Inicializar controladores de hardware
-- Gestionar navegación entre screens
-- Coordinar ciclo de vida de recursos
-- Cleanup de hardware al cambiar de pantalla
-
-**Dependencias:**
-```kotlin
-class MainActivity : ComponentActivity() {
-    private lateinit var flashlightController: FlashlightController
-    private lateinit var vibrationController: VibrationController
-    private lateinit var soundController: SoundController
-    private lateinit var meshController: BLEMeshController
-    private lateinit var userPreferences: UserPreferences
-}
-```
-
-**Ciclo de Vida:**
-```
-onCreate() → Inicializa controladores
-  ↓
-setContent() → Configura UI Compose
-  ↓
-Navigation → Gestiona cambios de pantalla
-  ↓
-onPause() → Cleanup de recursos
-  ↓
-onDestroy() → Liberación final
-```
-
----
-
-### 5.2 FlashlightController
-
-**Propósito:** Control del LED de la linterna para transmisión Morse
-
-**Interfaz Pública:**
-```kotlin
-class FlashlightController(private val context: Context) {
-    suspend fun transmit(timings: List<Long>)
-    fun turnOn()
-    fun turnOff()
-    fun cleanup()
-}
-```
-
-**Algoritmo de Transmisión:**
-```
-1. Para cada timing en timings[]:
-   a. Si índice es par → LED ON
-   b. Si índice es impar → LED OFF
-   c. Delay(timing[i])
-2. Asegurar LED OFF al final
-```
-
-**Dependencias:**
-- Camera2 API (`CameraManager`)
-- Coroutines (operaciones async)
-
-**Gestión de Recursos:**
-- Libera cámara en `cleanup()`
-- Apaga LED en `onPause()`
-
----
-
-### 5.3 MorseEncoder
-
-**Propósito:** Codificación de texto a secuencias temporales Morse
-
-**Interfaz Pública:**
-```kotlin
-class MorseEncoder {
-    fun encode(text: String): List<Long>
-    fun getAlphabetName(): String
-    fun getCurrentLocale(): Locale
-}
-```
-
-**Algoritmo de Codificación:**
-```
-1. Detectar idioma del texto (MorseAlphabet.detectScript())
-2. Obtener tabla Morse correspondiente
-3. Para cada carácter:
-   a. Buscar en tabla Morse
-   b. Convertir DOT (·) → 200ms ON (mínimo 6 frames a 30fps)
-   c. Convertir DASH (—) → 600ms ON (mínimo 18 frames a 30fps)
-   d. Agregar GAP inter-símbolo (200ms OFF)
-   e. Agregar GAP inter-letra (600ms OFF)
-4. Agregar marcador START al inicio
-5. Agregar marcador END al final
-6. Retornar List<Long> con timings
-```
-
-**Timing Estándar (v2.0 - optimizado para cámara a 30fps):**
-```kotlin
-DOT_DURATION = 200L    // ms (6 frames)
-DASH_DURATION = 600L   // ms (18 frames)
-SYMBOL_GAP = 200L      // ms
-LETTER_GAP = 600L      // ms
-WORD_GAP = 1200L       // ms
-```
-
----
-
-### 5.4 LightDetector
-
-**Propósito:** Análisis de frames de cámara para detectar señales Morse
-
-**Interfaz Pública:**
-```kotlin
-class LightDetector {
-    fun analyze(imageProxy: ImageProxy)
-    val decodedMessage: Flow<String>
-    val detectionState: Flow<DetectionState>
-}
-```
-
-**Pipeline de Procesamiento:**
-```
-ImageProxy (30 fps)
-    ↓
-[1] Calcular Luminosidad Promedio
-    brightness = Σ(Y-plane pixels) / totalPixels
-    ↓
-[2] Filtro Suavizado Exponencial
-    smoothed = α × current + (1-α) × previous
-    (α = 0.7)
-    ↓
-[3] Umbral Dinámico Adaptativo
-    // Solo si hay suficiente contraste (evita falsos positivos)
-    if (max - min > 30):
-        threshold = min + (max - min) × 0.4
-    historySize = 18 frames (600ms) para calibración estable
-    ↓
-[4] Detectar Transiciones
-    ON: brightness > threshold
-    OFF: brightness < threshold
-    ↓
-[5] Medir Duración de Pulsos
-    timestamp_on → timestamp_off = pulse_duration
-    ↓
-[6] Clasificar Pulsos (tolerancia ±100ms para compensar jitter)
-    ~200ms (≥6 frames)  → DOT
-    ~600ms (≥18 frames) → DASH
-    >800ms              → GAP
-    <200ms              → Ruido (descartado)
-    ↓
-[7] Detectar Marcadores
-    START (LARGO-CORTO-LARGO): ON 800ms → OFF 400ms → ON 800ms → OFF 800ms
-    END: OFF 1000ms → ON 200ms
-    ↓
-[8] Decodificar a Texto
-    MorseDecoder.decode(symbols)
-    ↓
-Mensaje Decodificado
-```
-
-**Optimizaciones:**
-- Procesamiento solo de Y-plane (luminosidad)
-- Buffer circular de 5 segundos
-- Early termination si no hay variación
-
----
-
-### 5.5 BLEMeshController
-
-**Propósito:** Red mesh Bluetooth LE para comunicación peer-to-peer
-
-**Interfaz Pública:**
-```kotlin
-class BLEMeshController(private val context: Context) {
-    val peers: StateFlow<List<MeshPeer>>
-    val messages: StateFlow<List<ChatMessage>>
-    val isAdvertising: StateFlow<Boolean>
-    val isScanning: StateFlow<Boolean>
-    
-    fun startAdvertising(callsign: String)
-    fun stopAdvertising()
-    fun startScanning()
-    fun stopScanning()
-    fun sendMessage(peerId: String, message: String)
-}
-```
-
-**Arquitectura Bluetooth LE:**
-```
-┌──────────────────────────────────────────┐
-│          Advertising (Server)             │
-│  ┌────────────────────────────────────┐  │
-│  │  Service UUID: 0000BEEF-...        │  │
-│  │  ┌──────────────────────────────┐  │  │
-│  │  │ Service Data: "CALLSIGN"     │  │  │
-│  │  └──────────────────────────────┘  │  │
-│  └────────────────────────────────────┘  │
-│  ┌────────────────────────────────────┐  │
-│  │  GATT Server                       │  │
-│  │  ┌──────────────────────────────┐  │  │
-│  │  │ Chat Service: 0000C4A7-...   │  │  │
-│  │  │  └─ Message Char: 00004D51   │  │  │
-│  │  │     (WRITE permission)       │  │  │
-│  │  └──────────────────────────────┘  │  │
-│  └────────────────────────────────────┘  │
-└──────────────────────────────────────────┘
-              ▲
-              │ BLE Connection
-              ▼
-┌──────────────────────────────────────────┐
-│           Scanning (Client)               │
-│  ┌────────────────────────────────────┐  │
-│  │  Scan Filter:                      │  │
-│  │  • Service UUID: 0000BEEF-...      │  │
-│  │  • Parse Service Data → Callsign   │  │
-│  └────────────────────────────────────┘  │
-│  ┌────────────────────────────────────┐  │
-│  │  GATT Client (to send messages)   │  │
-│  │  1. Connect to peer                │  │
-│  │  2. Discover services              │  │
-│  │  3. Find Message Characteristic    │  │
-│  │  4. Write: "CALLSIGN:MESSAGE"      │  │
-│  │  5. Disconnect                     │  │
-│  └────────────────────────────────────┘  │
-└──────────────────────────────────────────┘
-```
-
-**Flujo de Mensaje:**
-```
-Usuario A                    Usuario B
-   │                            │
-   ├──Scan→ Detecta B           │
-   │                            │
-   ├──Connect GATT──────────────>│
-   │                            │
-   ├──Discover Services─────────>│
-   │                            │
-   ├──Write "A:Hola"────────────>│
-   │                        [GATT Server]
-   │                        onCharWrite()
-   │                        ParseMessage()
-   │                        ShowInChat()
-   │                            │
-   │<─────Disconnect─────────────┤
-   │                            │
-```
-
----
-
-### 5.6 VibrationOscilloscope
-
-**Propósito:** Detección de patrones Morse mediante acelerómetro
-
-**Interfaz Pública:**
-```kotlin
-class VibrationOscilloscope {
-    fun startDetection()
-    fun stopDetection()
-    val magnitude: Flow<Float>
-    val decodedMessage: Flow<String>
-}
-```
-
-**Pipeline de Procesamiento:**
-```
-Accelerometer (200 Hz)
-    ↓
-Leer x, y, z
-    ↓
-[1] Filtro Pasa-Alto
-    // Eliminar componente de gravedad
-    x_filtered = x - gravity_x
-    y_filtered = y - gravity_y
-    z_filtered = z - gravity_z
-    ↓
-[2] Calcular Magnitud Vectorial
-    magnitude = √(x² + y² + z²)
-    ↓
-[3] Suavizado Exponencial
-    smoothed = α × current + (1-α) × previous
-    (α = 0.6)
-    ↓
-[4] Umbral Dinámico
-    threshold = mean + (stddev × 2.5)
-    ↓
-[5] Detectar Pulsos
-    ON: magnitude > threshold
-    OFF: magnitude < threshold
-    ↓
-[6] Clasificar como DOT/DASH/GAP
-    ↓
-[7] Decodificar a Texto
-    ↓
-Mensaje Final
-```
-
-**Calibración:**
-- Primeros 2 segundos: calibración automática
-- Calcula baseline de ruido ambiental
-- Ajusta umbral dinámicamente
-
----
-
-### 5.7 UserPreferences
-
-**Propósito:** Persistencia de configuración del usuario
-
-**Interfaz Pública:**
-```kotlin
-class UserPreferences(context: Context) {
-    val callsign: Flow<String>
-    
-    suspend fun setCallsign(value: String)
-}
-```
-
-**Tecnología:**
-- SharedPreferences (simple y rápido)
-- Keys con namespace: `"beaconchat_callsign"`
-
-**Validación:**
-- Callsign: 3-10 caracteres alfanuméricos
-- Default: "UNKNOWN"
-
----
-
-## 6. Patrones de Diseño
-
-### 6.1 Patrones Arquitectónicos
-
-#### 6.1.1 MVVM (Model-View-ViewModel)
-**Aplicación:**
-- **View:** Composables (Screens)
-- **ViewModel:** MainActivity (gestión de estado)
-- **Model:** Controllers + Data classes
-
-**Beneficios:**
-- Separación UI ↔ Lógica
-- Testabilidad mejorada
-- Estado reactivo con Flow
-
----
-
-#### 6.1.2 Repository Pattern
-**Aplicación:**
-- UserPreferences como repository de configuración
-- MeshController como repository de peers/messages
-
-**Beneficios:**
-- Abstracción de fuente de datos
-- Fácil cambio de implementación
-
----
-
-#### 6.1.3 Observer Pattern
-**Aplicación:**
-- StateFlow para estado reactivo
-- Flow para streams de datos
-
-**Ejemplo:**
-```kotlin
-val peers: StateFlow<List<MeshPeer>>
-// UI observa cambios automáticamente
-```
-
----
-
-### 6.2 Patrones de Diseño
-
-#### 6.2.1 Strategy Pattern
-**Aplicación:** Selección de método de transmisión
-
-```kotlin
-interface TransmissionStrategy {
-    suspend fun transmit(timings: List<Long>)
-}
-
-class FlashlightStrategy : TransmissionStrategy
-class VibrationStrategy : TransmissionStrategy
-class SoundStrategy : TransmissionStrategy
-```
-
----
-
-#### 6.2.2 Singleton Pattern
-**Aplicación:** Controladores de hardware
-
-```kotlin
-// Implícito en Kotlin object
-object MorseAlphabet {
-    // Único acceso global a tablas Morse
-}
-```
-
----
-
-#### 6.2.3 Builder Pattern
-**Aplicación:** Construcción de mensajes complejos
-
-```kotlin
-data class ChatMessage(
-    val senderId: String,
-    val senderName: String,
-    val recipientId: String = "",
-    val content: String,
-    val timestamp: Long = System.currentTimeMillis(),
-    val isFromMe: Boolean = false
-)
-```
-
----
-
-#### 6.2.4 State Pattern
-**Aplicación:** Estados de detección
-
-```kotlin
-sealed class DetectionState {
-    object Idle : DetectionState()
-    object WaitingForStart : DetectionState()
-    object Receiving : DetectionState()
-    data class Complete(val message: String) : DetectionState()
-    data class Error(val reason: String) : DetectionState()
-}
-```
-
----
-
-## 7. Flujo de Datos
-
-### 7.1 Flujo de Transmisión Completo
-
-```
-┌─────────────┐
-│   Usuario   │
-│             │
-│ "SOS"       │
-└──────┬──────┘
-       │ Input
-       ▼
-┌─────────────────────────┐
-│  TransmitterScreen      │
-│  • Composable           │
-│  • State Management     │
-└──────┬──────────────────┘
-       │ onClick()
-       ▼
-┌─────────────────────────┐
-│  MorseEncoder           │
-│  • detectScript()       │
-│  • getMorseTable()      │
-│  • encode(text)         │
-└──────┬──────────────────┘
-       │ List<Long> timings
-       │ [START, 150, 150, ...]
-       ▼
-┌─────────────────────────┐
-│  FlashlightController   │
-│  • transmit(timings)    │
-│  • launch coroutine     │
-└──────┬──────────────────┘
-       │ for each timing
-       ▼
-┌─────────────────────────┐
-│  Camera2 API            │
-│  • setTorchMode(true)   │
-│  • delay(duration)      │
-│  • setTorchMode(false)  │
-└─────────────────────────┘
-       │ Light Output
-       ▼
-    💡 LED Flash
-```
-
-### 7.2 Flujo de Recepción Completo
-
-```
-    📷 Cámara
-       │ Frame stream (30 fps)
-       ▼
-┌─────────────────────────┐
-│  CameraX ImageAnalysis  │
-│  • analyze(ImageProxy)  │
-└──────┬──────────────────┘
-       │ ImageProxy
-       ▼
-┌─────────────────────────┐
-│  LightDetector          │
-│  • calcBrightness()     │
-│  • applyFilter()        │
-│  • detectTransitions()  │
-│  • measurePulses()      │
-└──────┬──────────────────┘
-       │ List<Pulse>
-       │ [DOT, DOT, DOT, DASH, ...]
-       ▼
-┌─────────────────────────┐
-│  MorseDecoder           │
-│  • classify(pulse)      │
-│  • buildSymbol()        │
-│  • decode()             │
-└──────┬──────────────────┘
-       │ String message
-       │ "SOS"
-       ▼
-┌─────────────────────────┐
-│  ReceiverScreen         │
-│  • StateFlow update     │
-│  • UI recompose         │
-└──────┬──────────────────┘
-       │ Display
-       ▼
-┌─────────────┐
-│   Usuario   │
-│ Ve "SOS"    │
-└─────────────┘
-```
-
-### 7.3 Flujo de Red Mesh
-
-```
-Usuario A                 BLEMeshController A        BLE Stack         BLEMeshController B        Usuario B
-    │                            │                       │                      │                      │
-    ├─"Hola"───────────────────>│                       │                      │                      │
-    │                            │                       │                      │                      │
-    │                      [1] Construir mensaje        │                      │                      │
-    │                            │ "A:Hola"              │                      │                      │
-    │                            │                       │                      │                      │
-    │                      [2] Connect GATT             │                      │                      │
-    │                            ├──────────────────────>│                      │                      │
-    │                            │                       ├──────────────────────>│                      │
-    │                            │                       │              [GATT Server]                   │
-    │                            │                       │                      │                      │
-    │                      [3] Discover Services        │                      │                      │
-    │                            ├──────────────────────>│                      │                      │
-    │                            │                       ├──────────────────────>│                      │
-    │                            │<──────Services────────┤                      │                      │
-    │                            │                       │                      │                      │
-    │                      [4] Write Characteristic     │                      │                      │
-    │                            ├──"A:Hola"────────────>│                      │                      │
-    │                            │                       ├──────────────────────>│                      │
-    │                            │                       │              onCharWrite()                   │
-    │                            │                       │                      ├─Parse "A:Hola"───────>│
-    │                            │                       │                      │                "Hola"│
-    │                            │                       │                      │                      │
-    │                      [5] Disconnect               │                      │                      │
-    │                            ├──────────────────────>│                      │                      │
-    │                            │                       │                      │                      │
-    │<──"✓ Enviado"──────────────┤                       │                      │                      │
-```
-
----
-
-## 8. Decisiones Arquitectónicas
-
-### 8.1 ADR-001: Uso de Jetpack Compose
-
-**Contexto:**
-Necesidad de UI declarativa, moderna y mantenible.
-
-**Decisión:**
-Adoptar Jetpack Compose como framework de UI único.
-
-**Razones:**
-- UI declarativa reduce boilerplate
-- State management integrado
-- Material Design 3 nativo
-- Rendimiento superior a Views XML
-- Futuro de Android UI
-
-**Consecuencias:**
-- ✅ Código UI más conciso
-- ✅ Animaciones más fáciles
-- ✅ Mejor rendimiento
-- ⚠️ Curva de aprendizaje inicial
-- ⚠️ Requiere API 26+
-
----
-
-### 8.2 ADR-002: Arquitectura MVVM
-
-**Contexto:**
-Separar lógica de UI para mejor testabilidad.
-
-**Decisión:**
-Implementar patrón MVVM con MainActivity como ViewModel.
-
-**Razones:**
-- Separación clara de responsabilidades
-- Estado reactivo con StateFlow
-- Lifecycle awareness
-- Recomendación oficial de Google
-
-**Consecuencias:**
-- ✅ Código más testeable
-- ✅ UI reactiva automática
-- ✅ Menos bugs de sincronización
-- ⚠️ Más clases/archivos
-
----
-
-### 8.3 ADR-003: Controladores de Hardware Dedicados
-
-**Contexto:**
-Gestión compleja de recursos hardware limitados.
-
-**Decisión:**
-Crear controladores dedicados para cada hardware (Flash, Vibración, Sonido).
-
-**Razones:**
-- Encapsulación de lógica hardware
-- Reutilización entre screens
-- Cleanup centralizado
-- Evita conflictos de recursos
-
-**Consecuencias:**
-- ✅ Código reutilizable
-- ✅ Gestión de recursos centralizada
-- ✅ Fácil testing con mocks
-- ⚠️ Más abstracciones
-
----
-
-### 8.4 ADR-004: Morse Multi-Idioma en Objeto Singleton
-
-**Contexto:**
-Soporte para 9 alfabetos diferentes.
-
-**Decisión:**
-Centralizar tablas Morse en `MorseAlphabet` object (singleton).
-
-**Razones:**
-- Único punto de verdad para tablas
-- Detección automática de script
-- Fácil extensión a nuevos alfabetos
-- Sin duplicación de datos
-
-**Consecuencias:**
-- ✅ Mantenimiento simplificado
-- ✅ Consistencia garantizada
-- ✅ Extensibilidad
-- ⚠️ Tamaño en memoria (mínimo)
-
----
-
-### 8.5 ADR-005: StateFlow para Estado Reactivo
-
-**Contexto:**
-Necesidad de UI que reaccione a cambios de estado.
-
-**Decisión:**
-Usar StateFlow en lugar de LiveData.
-
-**Razones:**
-- Compatible con Kotlin Coroutines
-- Mejor integración con Compose
-- Type-safe
-- Más moderno que LiveData
-
-**Consecuencias:**
-- ✅ Código más limpio
-- ✅ Menos conversiones
-- ✅ Mejor rendimiento
-- ⚠️ Requiere entender Flow API
-
----
-
-### 8.6 ADR-006: Sin Base de Datos Persistente
-
-**Contexto:**
-Mensajes y peers no necesitan persistencia a largo plazo.
-
-**Decisión:**
-Mantener mensajes/peers solo en memoria (StateFlow).
-
-**Razones:**
-- App de emergencia, no chat permanente
-- Simplicidad arquitectónica
-- Mejor rendimiento
-- Privacidad (no almacena comunicaciones)
-
-**Consecuencias:**
-- ✅ Arquitectura más simple
-- ✅ Sin overhead de DB
-- ✅ Mejor privacidad
-- ⚠️ Datos se pierden al cerrar app
-
----
-
-### 8.7 ADR-007: Procesamiento de Imagen en Y-Plane Solo
-
-**Contexto:**
-Análisis de frames de cámara para detección de luz.
-
-**Decisión:**
-Analizar solo el Y-plane (luminosidad) de imágenes YUV.
-
-**Razones:**
-- Reducir carga computacional (1/3 de datos)
-- Suficiente para detectar ON/OFF
-- Mejor rendimiento en tiempo real
-- Batería más eficiente
-
-**Consecuencias:**
-- ✅ 3x más rápido
-- ✅ Menos consumo CPU
-- ✅ Suficiente precisión
-- ⚠️ No usa color (innecesario)
-
----
-
-## 9. Diagrama de Despliegue
-
-### 9.1 Arquitectura de Despliegue
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Dispositivo Android                       │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │              Sistema Operativo Android                │  │
-│  │                   (API 26-34)                         │  │
-│  │  ┌─────────────────────────────────────────────────┐  │  │
-│  │  │          Android Runtime (ART)                  │  │  │
-│  │  │  ┌───────────────────────────────────────────┐  │  │  │
-│  │  │  │       BeaconChat.apk                      │  │  │  │
-│  │  │  │  ┌─────────────────────────────────────┐  │  │  │  │
-│  │  │  │  │  MainActivity + Composables         │  │  │  │  │
-│  │  │  │  └─────────────────────────────────────┘  │  │  │  │
-│  │  │  │  ┌─────────────────────────────────────┐  │  │  │  │
-│  │  │  │  │  Controllers (Flash/Vib/Sound/BLE)  │  │  │  │  │
-│  │  │  │  └─────────────────────────────────────┘  │  │  │  │
-│  │  │  │  ┌─────────────────────────────────────┐  │  │  │  │
-│  │  │  │  │  Encoders/Decoders                  │  │  │  │  │
-│  │  │  │  └─────────────────────────────────────┘  │  │  │  │
-│  │  │  └───────────────────────────────────────────┘  │  │  │
-│  │  └─────────────────────────────────────────────────┘  │  │
-│  │                        │                               │  │
-│  │  ┌─────────────────────┼───────────────────────────┐  │  │
-│  │  │   Android Framework APIs                        │  │  │
-│  │  │  ┌──────────────┐  ┌──────────────┐            │  │  │
-│  │  │  │ Camera2      │  │ Bluetooth    │            │  │  │
-│  │  │  └──────────────┘  └──────────────┘            │  │  │
-│  │  │  ┌──────────────┐  ┌──────────────┐            │  │  │
-│  │  │  │ Vibrator     │  │ SensorManager│            │  │  │
-│  │  │  └──────────────┘  └──────────────┘            │  │  │
-│  │  │  ┌──────────────┐  ┌──────────────┐            │  │  │
-│  │  │  │ AudioTrack   │  │ SharedPrefs  │            │  │  │
-│  │  │  └──────────────┘  └──────────────┘            │  │  │
-│  │  └─────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │              Hardware Físico                          │  │
-│  │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐     │  │
-│  │  │ LED    │  │Vibrador│  │ Cámara │  │ BT Radio│    │  │
-│  │  │ Flash  │  │ Motor  │  │        │  │         │    │  │
-│  │  └────────┘  └────────┘  └────────┘  └────────┘     │  │
-│  │  ┌────────┐  ┌────────┐                             │  │
-│  │  │Altavoz │  │Aceler. │                             │  │
-│  │  └────────┘  └────────┘                             │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │          Almacenamiento Local                         │  │
-│  │  /data/data/com.nicobutter.beaconchat/               │  │
-│  │    ├── shared_prefs/                                 │  │
-│  │    │   └── beaconchat_preferences.xml                │  │
-│  │    └── cache/                                        │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 9.2 Distribución de APK
-
-```
-Desarrollo                Build                 Distribución
-┌─────────┐            ┌─────────┐            ┌─────────┐
-│         │            │         │            │         │
-│ Código  │───build───>│  APK    │───copy────>│releases/│
-│ Fuente  │            │ Debug   │            │ *.apk   │
-│         │            │         │            │         │
-└─────────┘            └─────────┘            └─────────┘
-     │                      │                      │
-     │                      │                      │
-     ▼                      ▼                      ▼
-  Kotlin              assembleDebug          BeaconChat_
-  Sources             gradle task            YYYYMMDD_
-   + XML                                     HHMMSS.apk
-Resources                                          +
-                                            BeaconChat_
-                                            latest.apk
-```
-
-### 9.3 Instalación en Dispositivo
-
-```
-Proceso de Instalación:
-
-1. Conexión USB
-   ┌──────────┐         USB          ┌──────────┐
-   │   PC     │◄──────────────────────┤ Android  │
-   │          │                       │          │
-   └──────────┘                       └──────────┘
-
-2. ADB (Android Debug Bridge)
-   $ adb install releases/BeaconChat_latest.apk
-
-3. Instalación
-   APK → Package Manager → Instalación → /data/app/
-
-4. Permisos en Runtime
-   App solicita:
-   - CAMERA
-   - VIBRATE
-   - BLUETOOTH_SCAN/ADVERTISE/CONNECT (API 31+)
-
-5. Lanzamiento
-   $ adb shell am start -n com.nicobutter.beaconchat/.MainActivity
-```
-
----
-
-## Apéndice A: Diagrama de Clases Principales
-
-```
-┌─────────────────────────┐
-│    MainActivity         │
-│─────────────────────────│
-│ - flashlightController  │
-│ - vibrationController   │
-│ - soundController       │
-│ - meshController        │
-│ - userPreferences       │
-│─────────────────────────│
-│ + onCreate()            │
-│ + onPause()             │
-│ + onDestroy()           │
-│ - cleanupControllers()  │
-└─────────────────────────┘
-         │ uses
-         ▼
-┌─────────────────────────┐      ┌─────────────────────────┐
-│ FlashlightController    │      │  MorseEncoder           │
-│─────────────────────────│      │─────────────────────────│
-│ - cameraManager         │      │ - morseAlphabet         │
-│ - cameraId              │      │─────────────────────────│
-│─────────────────────────│      │ + encode(text): List    │
-│ + transmit(timings)     │      │ + getAlphabetName()     │
-│ + turnOn()              │      │ + detectScript()        │
-│ + turnOff()             │      └─────────────────────────┘
-│ + cleanup()             │                 │ uses
-└─────────────────────────┘                 ▼
-         │ uses                  ┌─────────────────────────┐
-         ▼                       │   MorseAlphabet         │
-┌─────────────────────────┐      │─────────────────────────│
-│   Camera2 API           │      │ + LATIN_MORSE           │
-└─────────────────────────┘      │ + CYRILLIC_MORSE        │
-                                 │ + GREEK_MORSE           │
-┌─────────────────────────┐      │ + HEBREW_MORSE          │
-│   LightDetector         │      │ + ARABIC_MORSE          │
-│─────────────────────────│      │ + JAPANESE_MORSE        │
-│ - brightness: Float     │      │ + KOREAN_MORSE          │
-│ - threshold: Float      │      │ + THAI_MORSE            │
-│ - pulses: List          │      │ + PERSIAN_MORSE         │
-│─────────────────────────│      │─────────────────────────│
-│ + analyze(ImageProxy)   │      │ + getForLocale()        │
-│ - calcBrightness()      │      │ + detectScript()        │
-│ - applyFilter()         │      └─────────────────────────┘
-│ - detectTransitions()   │
-└─────────────────────────┘
-         │ uses
-         ▼
-┌─────────────────────────┐
-│   MorseDecoder          │
-│─────────────────────────│
-│ - symbols: List         │
-│─────────────────────────│
-│ + decode(pulses): String│
-│ + classify(duration)    │
-└─────────────────────────┘
-```
-
----
-
-## Apéndice B: Tecnologías y Versiones
-
-| Tecnología | Versión | Propósito |
-|------------|---------|-----------|
-| **Kotlin** | 1.8.22 | Lenguaje principal |
-| **Android Gradle Plugin** | 8.13.1 | Build system |
-| **Jetpack Compose** | BOM 2023.06.01 | UI Framework |
-| **Compose UI** | - | UI Components |
-| **Material 3** | - | Design system |
-| **CameraX** | Latest | Abstracción cámara |
-| **Lifecycle Runtime** | 2.7.0 | Lifecycle awareness |
-| **Activity Compose** | 1.8.2 | Integration Activity-Compose |
-| **Core KTX** | 1.10.1 | Kotlin extensions |
-| **Coroutines** | Latest | Async operations |
-| **StateFlow** | Latest | Reactive state |
-
----
-
-## Apéndice C: Métricas de Calidad
-
-### Complejidad Ciclomática
-| Componente | Complejidad | Evaluación |
-|------------|-------------|------------|
-| MorseEncoder.encode() | 8 | ✅ Aceptable |
-| LightDetector.analyze() | 12 | ⚠️ Considerar refactor |
-| BLEMeshController | 15 | ⚠️ Complejo pero necesario |
-| MainActivity | 6 | ✅ Buena |
-
-### Acoplamiento
-- **Acoplamiento eferente (Ce):** Bajo (4-6 dependencias promedio)
-- **Acoplamiento aferente (Ca):** Medio (2-3 dependientes promedio)
-- **Inestabilidad (I = Ce/(Ce+Ca)):** 0.6-0.7 (balance adecuado)
-
-### Cohesión
-- **LCOM (Lack of Cohesion):** Bajo en todos los módulos
-- Cada clase tiene responsabilidad única y bien definida
-
----
-
-## Historial de Revisiones
-
-| Versión | Fecha | Autor | Cambios |
-|---------|-------|-------|---------|
-| 1.0 | 2025-12-06 | NicoButter | Versión inicial del diseño arquitectónico |
-
----
-
-## Aprobaciones
-
-| Rol | Nombre | Firma | Fecha |
-|-----|--------|-------|-------|
-| Arquitecto de Software | NicoButter | | 2025-12-06 |
-| Revisor Técnico | | | |
-| Líder de Desarrollo | | | |
-
----
-
-**Documento Confidencial - Proyecto BeaconChat**  
-**Diseño de Arquitectura de Software v1.0**  
-**6 de diciembre de 2025**
+El inventario previo de componentes se mantiene [en el historial de Git](https://github.com/NicoButter/beaconchat/blob/c364293f42823d863976a5608aede8d3da7a50d3/docs/ARCHITECTURE.md). La arquitectura vigente aquí reemplaza aquella interpretación histórica; no se considera validación del sistema multisalto.

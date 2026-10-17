@@ -1,7 +1,7 @@
 # 05 · Factibilidad, riesgos y privacidad
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../../LICENSE) · Borrador para revisión · 16/10/2026**
-[Índice](../README.md) · [Validación](06-validacion.md) · [Roadmap](07-roadmap.md)
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+[Índice](../README.md) · [Validación](Validacion-BeaconChat.md) · [Roadmap](Roadmap-BeaconChat.md)
 
 ## Dictamen de prefactibilidad
 
@@ -107,4 +107,4 @@ Definir retención por fase/local/centro, quién autoriza acceso/borrado, cómo 
 
 ## Decisión de continuidad
 
-Continuar con E1 documental y PoC sintética; avanzar a E2/E3 solo con protocolo y pruebas físicas satisfactorias. Antes de un piloto con datos reales se requieren controles de seguridad, política de datos/retención, institución receptora, presupuesto y revisión de riesgos con responsables. Las dependencias no resueltas quedan visibles en F-01 a F-07 y en el [roadmap](07-roadmap.md), sin atribuir aprobaciones inexistentes.
+Continuar con E1 documental y PoC sintética; avanzar a E2/E3 solo con protocolo y pruebas físicas satisfactorias. Antes de un piloto con datos reales se requieren controles de seguridad, política de datos/retención, institución receptora, presupuesto y revisión de riesgos con responsables. Las dependencias no resueltas quedan visibles en F-01 a F-07 y en el [roadmap](Roadmap-BeaconChat.md), sin atribuir aprobaciones inexistentes.

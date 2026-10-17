@@ -1,7 +1,7 @@
 # 08 · Guía para completar el Reporte Pautado oficial
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../../LICENSE) · Borrador para revisión · 16/10/2026**
-[Índice](../README.md) · [Guía del Rally](00-guia-rally.md) · [Pitch](09-storyboard-y-pitch.md)
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+[Índice](../README.md) · [Guía del Rally](Guia-Rally-2026.md) · [Pitch](Pitch-Rally-2026.md)
 
 ## Estado de la plantilla
 
@@ -22,17 +22,17 @@
 
 | Si el formato solicita… | Fuente de este paquete | Qué debe completar o producir el equipo |
 | --- | --- | --- |
-| Problema/desafío | [01 · Problema](01-problema-y-alcance.md) | Transcripción exacta del desafío y relación con beneficiarios reales; el enunciado de Vetrabyte es orientativo |
-| Usuarios y necesidad | [01](01-problema-y-alcance.md), [02 · RU](02-requerimientos.md) | Población/contexto, evidencia y barreras verificadas; no inventar entrevistas |
-| Solución e innovación | [03 · Casos](03-casos-de-uso.md), [04 · Arquitectura](04-arquitectura.md) | Aporte propio sobre BeaconChat, comparación sustentada y decisiones originales |
-| Funcionamiento | [04](04-arquitectura.md) | Adaptar diagrama A→B/C→D→API→centro y explicar sin fix/sin vecinos/sin salida; rótulos E/S/P visibles |
-| Viabilidad técnica | [05 · Técnica](05-factibilidad.md), [06 · Pruebas](06-validacion.md) | Resultados realmente obtenidos y limitaciones; indicar qué fue simulado |
-| Viabilidad económica / modelo de sostenimiento | [05](05-factibilidad.md) | Cotizaciones y supuestos locales, operación/mantenimiento, moneda/fecha; no presentar costo cero por usar MIT |
-| Impacto social | [05](05-factibilidad.md) | Hipótesis frente a evidencia, acceso/inclusión y quién atiende las solicitudes |
-| Sustentabilidad ambiental | [05](05-factibilidad.md), [06 · Métricas](06-validacion.md) | Medir energía, recarga, reutilización y residuos; no inventar ahorros |
-| Implementación y próximos pasos | [07 · Roadmap](07-roadmap.md) | Alcance que puede asumir el equipo, recursos, responsables y fechas propias |
-| Validación / trazabilidad | [06](06-validacion.md), [10](10-trazabilidad.md) | Ensayos con fichas y evidencia, criterios y desvíos; no usar 48 tests como validación de la cadena completa |
-| Créditos, fuentes y anexos | [00](00-guia-rally.md), [LICENSE](../../LICENSE) | Atribución Vetrabyte / Nicolás Butterfield, MIT, autores del equipo y licencias de material adicional |
+| Problema/desafío | [01 · Problema](Vision-y-Alcance-BeaconChat.md) | Transcripción exacta del desafío y relación con beneficiarios reales; el enunciado de Vetrabyte es orientativo |
+| Usuarios y necesidad | [01](Vision-y-Alcance-BeaconChat.md), [02 · RU](ERS-BeaconChat.md) | Población/contexto, evidencia y barreras verificadas; no inventar entrevistas |
+| Solución e innovación | [03 · Casos](Casos-de-Uso-BeaconChat.md), [04 · Arquitectura](Diseño-Arquitectura-BeaconChat.md) | Aporte propio sobre BeaconChat, comparación sustentada y decisiones originales |
+| Funcionamiento | [04](Diseño-Arquitectura-BeaconChat.md) | Adaptar diagrama A→B/C→D→API→centro y explicar sin fix/sin vecinos/sin salida; rótulos E/S/P visibles |
+| Viabilidad técnica | [05 · Técnica](Factibilidad-BeaconChat.md), [06 · Pruebas](Validacion-BeaconChat.md) | Resultados realmente obtenidos y limitaciones; indicar qué fue simulado |
+| Viabilidad económica / modelo de sostenimiento | [05](Factibilidad-BeaconChat.md) | Cotizaciones y supuestos locales, operación/mantenimiento, moneda/fecha; no presentar costo cero por usar MIT |
+| Impacto social | [05](Factibilidad-BeaconChat.md) | Hipótesis frente a evidencia, acceso/inclusión y quién atiende las solicitudes |
+| Sustentabilidad ambiental | [05](Factibilidad-BeaconChat.md), [06 · Métricas](Validacion-BeaconChat.md) | Medir energía, recarga, reutilización y residuos; no inventar ahorros |
+| Implementación y próximos pasos | [07 · Roadmap](Roadmap-BeaconChat.md) | Alcance que puede asumir el equipo, recursos, responsables y fechas propias |
+| Validación / trazabilidad | [06](Validacion-BeaconChat.md), [10](Trazabilidad-BeaconChat.md) | Ensayos con fichas y evidencia, criterios y desvíos; no usar 48 tests como validación de la cadena completa |
+| Créditos, fuentes y anexos | [00](Guia-Rally-2026.md), [LICENSE](../LICENSE) | Atribución Vetrabyte / Nicolás Butterfield, MIT, autores del equipo y licencias de material adicional |
 
 Esta tabla es una ayuda de redacción. El orden, títulos, extensiones y campos finales serán los de la plantilla oficial. No agregar un canvas, una portada, anexos o una sección supuestamente obligatoria sin verificar que correspondan.
 

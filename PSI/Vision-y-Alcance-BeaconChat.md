@@ -1,7 +1,7 @@
 # 01 · Problema, objetivos y alcance
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../../LICENSE) · Borrador para revisión · 16/10/2026**
-[Índice](../README.md) · [Requerimientos](02-requerimientos.md)
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+[Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md)
 
 ## Problema y propuesta
 
@@ -30,7 +30,7 @@ Todo este flujo integral es **P**. No todos los teléfonos necesitan Internet; A
 | O-04 · Permitir atención informada | Operador ve precisión, antigüedad, gravedad declarada y estado, con acceso restringido |
 | O-05 · Reconocer límites y cuidar datos | Sin falsa confirmación; fallos visibles, controles de privacidad y medición de energía |
 
-Los objetivos no declaran una reducción medida de tiempos de rescate ni tasas de entrega. Sus pruebas están en [06](06-validacion.md).
+Los objetivos no declaran una reducción medida de tiempos de rescate ni tasas de entrega. Sus pruebas están en [06](Validacion-BeaconChat.md).
 
 ## Usuarios y actores
 
@@ -58,7 +58,7 @@ Los objetivos no declaran una reducción medida de tiempos de rescate ni tasas d
 | Seguridad | Callsign/MAC no autentican; sin seguridad propia extremo a extremo | **P:** autenticación, cifrado, autorización, retención y mitigación de falsos SOS |
 | LoRa | Ausente | **P:** complemento opcional con radio/gateway externo, nunca requisito del MVP |
 
-E/S no equivalen a ensayos de campo aprobados. [Arquitectura y fuentes de código](04-arquitectura.md).
+E/S no equivalen a ensayos de campo aprobados. [Arquitectura y fuentes de código](Diseño-Arquitectura-BeaconChat.md).
 
 ## Escenarios y degradación
 

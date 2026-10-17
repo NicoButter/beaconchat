@@ -1,7 +1,7 @@
 # 10 · Trazabilidad de la propuesta
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../../LICENSE) · Borrador para revisión · 16/10/2026**
-[Índice](../README.md) · [Requerimientos](02-requerimientos.md) · [Casos](03-casos-de-uso.md) · [Pruebas](06-validacion.md) · [Etapas](07-roadmap.md)
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+[Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Casos](Casos-de-Uso-BeaconChat.md) · [Pruebas](Validacion-BeaconChat.md) · [Etapas](Roadmap-BeaconChat.md)
 
 ## Convención
 
@@ -27,7 +27,7 @@ Se omite `R26-` en las celdas compactas: `RU-01` significa `R26-RU-01`, `PR-01` 
 | RF-14 | RU-09 | CU-10 | PR-17 | E4–E5 | P: recursos, brigadistas, rutas y prioridad asistida humana |
 | RF-15 | RU-09 | CU-10 | PR-18 | E5 opcional | P: LoRa con dispositivo/gateway externo |
 
-Los componentes actuales enlazados y sus límites están en [04 · Fuentes](04-arquitectura.md). Un caso de uso con varias funciones E/S/P no hereda el estado más avanzado: CU-03 solo tiene lógica S y no tránsito físico; CU-07 integral sigue P aunque use RF-01 como antecedente de confirmación local.
+Los componentes actuales enlazados y sus límites están en [04 · Fuentes](Diseño-Arquitectura-BeaconChat.md). Un caso de uso con varias funciones E/S/P no hereda el estado más avanzado: CU-03 solo tiene lógica S y no tránsito físico; CU-07 integral sigue P aunque use RF-01 como antecedente de confirmación local.
 
 ## Cobertura de atributos y restricciones
 
@@ -74,4 +74,4 @@ Esta edición define **9 RU, 15 RF, 10 RNF y 9 RS** (43 requerimientos), **10 CU
 
 Para una revisión posterior: actualizar primero el estado/evidencia del componente, después los requisitos y casos, luego pruebas/roadmap y finalmente esta matriz. Una función pasa de P/S a E solo con código identificable; su validación física se registra por separado. No cerrar pendientes por cambiar rótulos o por contar enlaces como si fueran tests aprobados.
 
-Las decisiones F-01–F-07 están en [00](00-guia-rally.md); los riesgos K-01–K-12 en [05](05-factibilidad.md). Ningún requisito aquí reemplaza el desafío literal ni declara aprobado el uso operativo o la publicación.
+Las decisiones F-01–F-07 están en [00](Guia-Rally-2026.md); los riesgos K-01–K-12 en [05](Factibilidad-BeaconChat.md). Ningún requisito aquí reemplaza el desafío literal ni declara aprobado el uso operativo o la publicación.

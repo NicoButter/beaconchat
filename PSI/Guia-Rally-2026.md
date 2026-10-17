@@ -1,7 +1,7 @@
 # 00 · Guía de uso para el Rally 2026
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../../LICENSE) · Borrador para revisión · 16/10/2026**
-[Índice de ingeniería](../README.md) · [Trazabilidad](10-trazabilidad.md)
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+[Índice de ingeniería](../README.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
 
 ## Propósito y fuentes
 
@@ -13,13 +13,13 @@ Este paquete es material de referencia de Vetrabyte para analizar una propuesta 
 | [La Competencia](https://www.rallydeinnovacion.org/competencia/) | Información oficial recuperada mediante búsqueda el 16/10/2026; apertura directa intermitente. Resume entregables y dinámica. |
 | [ANFEI · convocatoria de sedes 2026](https://www.anfei.mx/actividades/registro_sedes_2026/) | Publicada el 08/07/2026 y consultada el 16/10/2026; confirma edición y participación internacional. |
 | [Edición 2026](https://www.rallydeinnovacion.org/edicion_2026/) | Referencia indicada por ANFEI; no se pudo recuperar su contenido. Verificación específica pendiente con la sede. |
-| Código de `main` y [fuentes técnicas](04-arquitectura.md) | Base local `2e754e315a40533e9b3f61a0a2a292d2db9b96a2`; sustenta qué existe. |
+| Código de `main` y [fuentes técnicas](Diseño-Arquitectura-BeaconChat.md) | Base local `2e754e315a40533e9b3f61a0a2a292d2db9b96a2`; sustenta qué existe. |
 
 La edición está anunciada para el **16 y 17 de octubre de 2026**, durante 28 horas. La página de competencia indica un video YouTube de **hasta dos minutos**, el **Reporte Pautado en PDF cargado en SIRLI** y una interacción internacional lúdica entre equipos vinculados, plasmada en TikTok de **hasta un minuto**. ANFEI 2026 señala su carácter obligatorio y la etiqueta `#RallyLatam26`. Confirmar horarios, accesibilidad de enlaces y condiciones de sede en SIRLI. [Competencia](https://www.rallydeinnovacion.org/competencia/), [ANFEI](https://www.anfei.mx/actividades/registro_sedes_2026/).
 
 ## Responsabilidad del equipo y autoría
 
-BeaconChat y su código preexistente son de **Vetrabyte / Nicolás Butterfield**. [LICENSE](../../LICENSE) conserva `Copyright (c) 2025 Nicolás Butterfield` y la licencia MIT. Toda copia o porción sustancial distribuida del software/documentación debe conservar el aviso de copyright y permiso. No se cambia esa licencia, su año ni la titularidad mediante este paquete.
+BeaconChat y su código preexistente son de **Vetrabyte / Nicolás Butterfield**. [LICENSE](../LICENSE) conserva `Copyright (c) 2025 Nicolás Butterfield` y la licencia MIT. Toda copia o porción sustancial distribuida del software/documentación debe conservar el aviso de copyright y permiso. No se cambia esa licencia, su año ni la titularidad mediante este paquete.
 
 Crédito sugerido, para adaptar con aportes verificables:
 
@@ -29,11 +29,11 @@ La información oficial anuncia divulgación pública del material entregado. El
 
 ## Preparación de los entregables
 
-1. Registrar el desafío literal, identificador, sede y equipo; contrastarlos con [01](01-problema-y-alcance.md).
-2. Obtener de SIRLI o de coordinación la **plantilla oficial**. Registrar archivo, versión, fecha y restricciones en [08](08-guia-reporte-pautado.md). No se recibió esa plantilla: no se fabrica ni se adjunta un PDF sustituto.
+1. Registrar el desafío literal, identificador, sede y equipo; contrastarlos con [01](Vision-y-Alcance-BeaconChat.md).
+2. Obtener de SIRLI o de coordinación la **plantilla oficial**. Registrar archivo, versión, fecha y restricciones en [08](Reporte-Pautado-Rally-2026.md). No se recibió esa plantilla: no se fabrica ni se adjunta un PDF sustituto.
 3. Separar en toda pieza evidencia de código **E**, simulación **S** y propuesta **P**. La clasificación se define en [PSI/README.md](../README.md).
-4. Completar el reporte con las fuentes y métricas de [05](05-factibilidad.md) y [06](06-validacion.md); marcar expresamente lo no medido.
-5. Adaptar [09](09-storyboard-y-pitch.md), grabar material propio y revisar duración/créditos. El equipo gestiona sus publicaciones y cargas.
+4. Completar el reporte con las fuentes y métricas de [05](Factibilidad-BeaconChat.md) y [06](Validacion-BeaconChat.md); marcar expresamente lo no medido.
+5. Adaptar [09](Pitch-Rally-2026.md), grabar material propio y revisar duración/créditos. El equipo gestiona sus publicaciones y cargas.
 
 ## Criterios orientativos para preparar la revisión
 
