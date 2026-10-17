@@ -8,6 +8,14 @@ Proyecto de <a href="https://vetrabyte.com.ar">Vetrabyte</a> · Nicolás Butterf
 
 > **Estado: prototipo experimental.** BeaconChat implementa distintos canales locales de señalización y comunicación entre dispositivos Android. No es un servicio de rescate, una radiobaliza certificada ni un sustituto de comunicaciones de emergencia oficiales. Algunas funciones están implementadas en código pero siguen pendientes de validación sobre dispositivos y en condiciones de campo.
 
+## 🎬 Video institucional
+
+[![BeaconChat — Video institucional de Vetrabyte](https://img.youtube.com/vi/DCazWm7UWt4/hqdefault.jpg)](https://youtu.be/DCazWm7UWt4)
+
+▶️ **[Ver BeaconChat en YouTube](https://youtu.be/DCazWm7UWt4)**
+
+Una presentación audiovisual de BeaconChat, sus tecnologías de comunicación local y la **propuesta futura** de transmitir solicitudes SOS con ubicación GPS/GNSS a través de dispositivos vecinos hasta un nodo con acceso a Internet. Las escenas de red mesh multisalto y del centro de emergencias son **representaciones conceptuales**, no una demostración de esas funciones operando en teléfonos reales.
+
 ## ¿Qué problema busca resolver?
 
 Durante un corte de conectividad móvil o Wi-Fi, varios componentes de un teléfono siguen disponibles: Bluetooth Low Energy (BLE), cámara, linterna, parlante, vibrador y acelerómetro. BeaconChat explora cómo utilizarlos para **intercambiar mensajes de proximidad** y **emitir/detectar señales** sin servidor central ni conexión a Internet.
@@ -175,6 +183,14 @@ A <a href="https://vetrabyte.com.ar">Vetrabyte</a> project · Nicolás Butterfie
 
 
 > **Status: experimental prototype.** BeaconChat implements several local signaling and communication methods for Android devices. It is not a certified rescue device, emergency beacon, or replacement for official emergency communications. Some features exist in code but still need physical-device and field testing.
+
+## 🎬 Institutional video
+
+[![BeaconChat — Vetrabyte institutional video](https://img.youtube.com/vi/DCazWm7UWt4/hqdefault.jpg)](https://youtu.be/DCazWm7UWt4)
+
+▶️ **[Watch BeaconChat on YouTube](https://youtu.be/DCazWm7UWt4)**
+
+An overview of BeaconChat's local communication technologies and the **proposed future** geolocated SOS relay through neighboring devices to an Internet-connected gateway. Multi-hop mesh and emergency coordination scenes are **conceptual visualizations**, not demonstrations of working real-device functionality.
 
 ## What is BeaconChat for?
 
