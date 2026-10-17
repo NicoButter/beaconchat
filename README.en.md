@@ -1,6 +1,7 @@
 # BeaconChat 📡
 
 <p align="center"><img src="docs/logo.png" alt="Original BeaconChat logo" width="180"></p>
+<p align="center"><a href="https://vetrabyte.com.ar/"><img src="docs/vetrabyte-logo.webp" alt="Vetrabyte Software Development, creator of BeaconChat" width="350"></a></p>
 <p align="center"><strong>Alternative communication and emergency signaling without Internet access</strong><br>
 A <a href="https://vetrabyte.com.ar">Vetrabyte</a> project · Nicolás Butterfield · <a href="mailto:nicobutter@gmail.com">Contact</a></p>
 <p align="center"><a href="README.md">Español</a> · <strong>English</strong> · <a href="LICENSE">MIT License</a></p>
