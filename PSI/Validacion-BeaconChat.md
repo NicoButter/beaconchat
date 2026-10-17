@@ -1,7 +1,117 @@
 # 06 · Validación y criterios de aceptación
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 17/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
+
+## Validación técnica actual — Issue #1 · 17/10/2026
+
+**Resultado: tests JVM y APK debug aprobados con Gradle 8.13 / JDK 21; comunicación física A↔B pendiente. No corresponde declarar cerrado el criterio de aceptación de radio.** `adb devices -l` devolvió una lista vacía. No se instalaron APK en teléfonos ni se ejecutaron pruebas físicas o instrumentadas.
+
+Repositorio `NicoButter/beaconchat`, rama `main`, HEAD `1addfd65f9b3f70382c6e1b955acc3f7837c2703`. Se consultó el [Issue #1](https://github.com/NicoButter/beaconchat/issues/1), abierto al momento de la revisión. Por instrucción de esta tarea se trabajó en el checkout existente: sin ramas, worktrees, commit, push, publicación ni modificación del issue.
+
+### Entorno, ejecución y evidencia nueva
+
+Al comenzar ya estaba modificado `gradle/wrapper/gradle-wrapper.properties`: distribución local **9.7.1**, mientras que HEAD fija **8.13**. Ese cambio previo se conserva íntegro; no se lo atribuye a esta intervención. SHA-256 del archivo local preservado: `536939b15bb97c97b0acb562a9ed916a6cc8c9fe34b67d387cbe2a66d1d9e295`.
+
+| Ejecución del 17/10/2026 | Resultado observado |
+| --- | --- |
+| `./gradlew testDebugUnitTest assembleDebug --console=plain` dentro del sandbox | Bloqueado al abrir `gradle-9.7.1-bin.zip.lck`: caché de usuario de solo lectura. No llegó a ejecutar tareas. |
+| Mismo comando con acceso autorizado a la caché; Java predeterminado 25.0.4.1 y wrapper local 9.7.1 | `BUILD FAILED` al aplicar AGP 8.13.1: `InternalProblems`, API interna eliminada en Gradle 9.6.0. No es un fallo de un test BLE. |
+| Gradle 8.13 instalado con `JAVA_HOME=/usr/lib/jvm/java-21-openjdk` | No inició: ese directorio del sistema no contiene un JDK válido. |
+| Gradle 8.13 instalado y Temurin **21.0.7+6**, comando exacto debajo | **BUILD SUCCESSFUL in 36s**, 44 tareas ejecutadas; `testDebugUnitTest` y `assembleDebug` ejecutados, sin reutilizar resultados de tareas. |
+| Lectura de los XML recién generados | **48 tests; 0 fallos, 0 errores, 0 omitidos**. Timestamp inicial `2026-10-17T19:13:03.726Z` (16:13:03, UTC−03:00, America/Argentina/Rio_Gallegos). |
+| `apksigner verify --verbose app/build/outputs/apk/debug/app-debug.apk` (Build Tools 35.0.0) | Firma válida, esquema v2, un firmante debug. |
+| `adb devices -l` | Sin dispositivos conectados; A↔B físico **no ejecutado**. |
+
+Comando que efectivamente ejecutó ambas tareas en este entorno, sin editar el wrapper:
+
+```bash
+JAVA_HOME=/home/lordcommander/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 \
+  /home/lordcommander/.gradle/wrapper/dists/gradle-8.13-bin/5xuhj0ry160q40clulazy9h7d/gradle-8.13/bin/gradle \
+  testDebugUnitTest assembleDebug --console=plain
+```
+
+Para otro equipo: usar un JDK 21 válido, Android SDK 34 y Build Tools 35.0.0 con las dependencias disponibles, y ejecutar `gradle` de una instalación **8.13** contra este checkout. La [matriz oficial de AGP 8.13](https://developer.android.com/build/releases/agp-8-13-0-release-notes) indica Gradle 8.13 y JDK mínimo 17. El wrapper versionado en HEAD ya usa 8.13; **el wrapper local preservado sigue fallando con 9.7.1**. El éxito de la invocación alternativa no equivale a un éxito de `./gradlew` en su estado local actual.
+
+| Suite JVM | Tests aprobados | Alcance |
+| --- | --- | --- |
+| `DirectBleProtocolTest` | 13 | Callsign, publicidad como bytes, paquete de 20 bytes, Unicode/emoji, UTF-8 inválido, espacios, mensajes vacíos y exceso sin truncamiento. |
+| `DirectSendStateTest` | 3 | Orden y callbacks duplicados; finalización terminal en cada fase; nuevo intento después de finalizar otro. No ejecuta los timers ni callbacks Android del controlador. |
+| `ExampleUnitTest` | 1 | Test aritmético de ejemplo; sin cobertura BLE. |
+| `MeshEngineTest` / `MeshTopologyTest` | 22 / 9 | Regresión de lógica simulada preexistente. No valida GATT ni activa multisalto en la app. |
+
+Evidencia local generada, no versionada:
+
+- Reporte: `app/build/reports/tests/testDebugUnitTest/index.html`; resultados: `app/build/test-results/testDebugUnitTest/TEST-*.xml`.
+- APK: `app/build/outputs/apk/debug/app-debug.apk`, **11.941.565 bytes**; SHA-256 `7820ea0a6a7333865f181c066c87439e2455ceb8be1ddb11e80f76bccceaacf4`.
+- Logs de intentos: `/tmp/beaconchat-validation-gradle-initial.log`, `/tmp/beaconchat-validation-gradle-wrapper.log`, `/tmp/beaconchat-validation-gradle-8.13.log` y `/tmp/beaconchat-validation-gradle-8.13-jdk21.log` (último: ejecución exitosa).
+
+Persisten advertencias de configuración BuildConfig, Java source/target 8, opt-in/variables en módulos existentes y stripping de `libimage_processing_util_jni.so`. **No se ejecutó Lint en esta intervención**; los errores de Lint de los anexos son antecedentes, no resultados nuevos.
+
+### Revisión del flujo BLE y cobertura real
+
+Se revisaron [BLEMeshController](../app/src/main/java/com/nicobutter/beaconchat/mesh/BLEMeshController.kt), [MeshScreen](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/MeshScreen.kt), [DirectBleProtocol](../app/src/main/java/com/nicobutter/beaconchat/mesh/DirectBleProtocol.kt), [DirectSendState](../app/src/main/java/com/nicobutter/beaconchat/mesh/DirectSendState.kt), manifest y tests existentes. La tabla describe lo comprobado por lectura y JVM; **ninguna fila acredita ejecución del stack Bluetooth en Android**.
+
+| Área | Comprobación en código / JVM | Verificación física pendiente |
+| --- | --- | --- |
+| Permisos | API 31+: SCAN, CONNECT y ADVERTISE; API 24–30: ubicación precisa, permisos Bluetooth legacy y chequeo de proveedor de ubicación para scan. La UI revalida permisos al reanudar. | Concesión, denegación, revocación desde Ajustes, ubicación apagada y recuperación por versión Android. |
+| Publicidad | Servidor GATT y `onServiceAdded` antes de anunciar; conectable; UUID en primario, callsign en service data de scan response; sin nombre ni potencia. Presupuesto conservador con UUID de 128 bits: primario 21 y respuesta hasta 26 bytes, ambos ≤31. | Paquetes efectivamente emitidos, soporte del advertiser y recepción del scan response en ambos equipos. |
+| Estados de publicidad | `isStartingAdvertising` durante inicio; `isAdvertising` solo tras `onStartSuccess`; generación de sesión descarta callbacks antiguos; timeout de inicio de 10 s y cierre por fallo. | Éxito/error reales y ausencia de “Visible” falso al detener/reanudar rápidamente. |
+| Escaneo | Filtro por UUID; `scanRequested` al solicitar, `isScanning` al recibir resultado; parseo estricto del callsign y manejo de `onScanFailed`. La UI distingue solicitud de señales detectadas. | Descubrimiento A→B y B→A, RSSI, errores del stack y reintentos. |
+| GATT saliente | Un envío por vez; `connectGatt(... TRANSPORT_LE)` → conexión → descubrimiento de servicio/characteristic → WRITE con respuesta → callback. IDs de servicio y característica coinciden entre cliente y servidor. | Conexión y escritura reales, ambos roles simultáneos y fallos de servicio/enlace. |
+| Finalización | Timeout global de 20 s, error, cancelación, pausa o Bluetooth apagado pasan por cierre de GATT y liberación de `isSending`; callbacks tardíos de otra operación no completan un envío nuevo. | El timeout del Handler y la limpieza real de handles no están cubiertos por `DirectSendStateTest`. |
+| Recepción | Servidor decodifica antes de agregar texto; rechaza UUID incorrecto, offset, prepared write, escritura sin respuesta y carga inválida. Envía respuesta GATT cuando corresponde. | Recepción íntegra en el chat correcto y respuesta efectiva del servidor. |
+| Integridad y UI | `CALLSIGN:MENSAJE`, UTF-8 estricto, máximo 20 bytes; callsign ≤8 bytes; UI y controlador validan exceso. Historial saliente solo tras `GATT_SUCCESS`, con leyenda “sin ACK”. | Contador, botón bloqueado, borrador conservado ante fallo y aparición única de cada texto en ambos teléfonos. |
+| Ciclo de vida | Observer de resume/pause y `onDispose` detienen scan, publicidad, servidor y envío. Broadcast Bluetooth actualiza estado y detiene al apagarse. | Navegación, Home, bloqueo, permisos y apagado/encendido sin recursos BLE residuales. |
+
+La interpretación de callbacks se contrastó con [AdvertiseCallback](https://developer.android.com/reference/android/bluetooth/le/AdvertiseCallback) y [BluetoothGattCallback](https://developer.android.com/reference/android/bluetooth/BluetoothGattCallback). La [documentación de permisos Android](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions) advierte que `neverForLocation` puede filtrar algunos beacons: su efecto sobre este anuncio debe comprobarse en equipos reales.
+
+### Procedimiento reproducible con dos Android — no ejecutado
+
+Preparación y registro:
+
+1. Usar dos teléfonos físicos A y B con Android **7/API 24 o superior** (minSdk real de esta APK), ambos capaces de scan y publicidad BLE conectable. Preferir un par API 24–30 / API 31+ para cubrir ambos grupos de permisos. Registrar modelo, fabricante, versión/API, batería, fecha/zona horaria, responsable, HEAD y SHA-256 de la APK. Colocarlos a 1–2 m, sin obstáculos, y mantener ambos en primer plano durante los envíos normales.
+2. Instalar la **misma APK** en ambos, usando USB y sus seriales explícitos; no usar scripts que elijan el primer dispositivo ni desinstalar automáticamente para resolver un conflicto de firma. Estos comandos son instrucciones futuras, no acciones realizadas:
+
+   ```bash
+   adb devices -l
+   sha256sum app/build/outputs/apk/debug/app-debug.apk
+   adb -s SERIE_A install -r app/build/outputs/apk/debug/app-debug.apk
+   adb -s SERIE_B install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+3. En Ajustes de la app configurar callsigns ASCII distintos: A=`ALFA`, B=`BRAVO`. En cada teléfono activar **modo avión**, reactivar **Bluetooth manualmente** y comprobar que **Wi-Fi y datos móviles sigan apagados**, incluidas ambas SIM si aplica. Desactivar tethering si estuviera activo. En Android 7–11 activar Ubicación para escanear; no necesita Wi-Fi ni datos. Guardar capturas de los ajustes antes y después del ensayo; modo avión por sí solo no acredita Wi-Fi apagado.
+4. Capturar logs en dos terminales durante el ensayo, uno por equipo. Por ejemplo, `adb -s SERIE_A logcat -v threadtime > /tmp/beaconchat-A-logcat.txt` y el equivalente B; detener con Ctrl+C. No usar un filtro de tags propios: el controlador actual no emite logs de sus callbacks. Grabar pantalla o tomar capturas de ambos chats. Para verificar transiciones GATT/paquetes o cese de radio que la UI no permite observar, usar registro Bluetooth HCI disponible en el dispositivo o inspección BLE externa y anotar el método; sin esa evidencia marcar esa parte como no comprobada.
+5. Abrir **Mesh Radar** y ejecutar los casos en orden. Esperar hasta **30 s** para descubrimiento (ventana de observación del ensayo, no garantía de la app). Registrar todos los intentos, también los fallidos, sin cambiar umbrales después de observarlos.
+
+| Caso | Acción y criterio esperado | Resultado de esta intervención |
+| --- | --- | --- |
+| BLE-01 · Permisos | Denegar el primer pedido: sin crash ni visibilidad/scan exitosos. Conceder desde Ajustes y volver: revalidación e inicio. Repetir revocando permisos con la app pausada. En API 24–30 apagar Ubicación: error explícito al intentar scan; activarla y pulsar Iniciar Escaneo. | No ejecutado |
+| BLE-02 · Descubrimiento | Con permisos y Bluetooth activos en ambos, observar “Iniciando publicidad/GATT…” y después “Visible (Anunciando)” o error en ≤10 s más latencia de UI. Scan muestra solicitud hasta recibir señales. A debe listar BRAVO y B debe listar ALFA en la ventana de 30 s. La lista no prueba una conexión GATT. | No ejecutado |
+| BLE-03 · A→B | Abrir BRAVO en A y ALFA en B. Enviar `HOLA B` desde A; observar conexión/descubrimiento/escritura si su duración permite capturarlos. Debe aparecer una sola burbuja saliente en A tras el callback exitoso y el texto exacto en B. No aceptar “entregado” como sustituto de observar B. | No ejecutado |
+| BLE-04 · B→A | Enviar `HOLA A` desde B, con los mismos criterios en sentido inverso. Verificar que llega al chat de BRAVO en A. | No ejecutado |
+| BLE-05 · Repetición | Enviar `A01`…`A10` desde A y `B01`…`B10` desde B, alternando y esperando cada resultado: **10 intentos por dirección**. Añadir un par simultáneo `ASIM` / `BSIM`. Registrar por separado intentados, escritura confirmada y recepción observada. En condición estable, cada texto debe aparecer íntegro y una vez en el receptor; anotar cualquier diferencia. | No ejecutado |
+| BLE-06 · UTF-8 y borde | Enviar en ambas direcciones `sí:🆘` y ` a:b `, conservando sus espacios. Con ALFA el máximo de texto es 15 bytes: `123456789012345` debe pasar; agregar un dígito debe bloquear envío. Con BRAVO son 14: `12345678901234` debe pasar; agregar un dígito debe bloquear. Tres `🆘` ocupan 12 bytes y caben; cuatro ocupan 16 y deben rechazarse en ambos. Sin truncamiento ni burbuja saliente para el exceso. | No ejecutado |
+| BLE-07 · Visibilidad y scan | Apagar/encender visibilidad en cada teléfono; verificar detención y nueva publicidad. Detener scan: estado detenido y lista vacía; reiniciar y redescubrir antes del siguiente envío. Repetir cambio de visibilidad durante inicio; no debe reaparecer “Visible” por una sesión detenida. Confirmar emisión/cese con HCI/observador BLE cuando se evalúe la radio. | No ejecutado |
+| BLE-08 · Bluetooth off/on | Apagar Bluetooth en B justo después de iniciar un envío de A; repetir apagando A. Anotar si el mensaje ya había terminado antes del corte; en ese caso el fallo no fue inducido. En un envío interrumpido, `isSending` debe liberarse por error o timeout de 20 s más latencia de UI, borrador conservado y sin nueva burbuja exitosa. Encender, redescubrir y repetir A↔B. | No ejecutado |
+| BLE-09 · Desconexión/timeout | Descubrir B, abrir su chat en A y luego cerrar Mesh en B o alejarlo antes de enviar. Debe fallar o vencer la espera, liberar el envío y permitir otro intento tras restaurar/redescubrir B. Si se observa un error inmediato, no declararlo prueba del timeout de 20 s. | No ejecutado |
+| BLE-10 · Ciclo de vida | Salir de Mesh durante inicio; volver. Repetir durante envío, volver al radar, navegar a otra pantalla, pulsar Home y bloquear/desbloquear. Comprobar cancelación, borrador del chat ante fallo y reinicio conforme a controles al reanudar. Borrador no se promete tras abandonar la composición del chat. Con observación de radio verificar cese de scan/advertising y cierre GATT; la pantalla sola no lo demuestra. | No ejecutado |
+| BLE-11 · Errores GATT | Si hay un cliente/periférico de prueba, inducir servicio/característica ausente, respuesta de escritura fallida, offset/prepared write y UTF-8 inválido. Esperar error o rechazo, sin truncamiento ni éxito falso, y siguiente envío posible. Registrar herramienta, UUID/carga y status. Sin herramienta o fallo inducido, dejar el subcaso no ejecutado. | No ejecutado |
+| BLE-12 · Sin advertiser | Solo si hay hardware que no soporte advertising: debe mostrar error, nunca “Visible”. No inferir cobertura de este caso a partir de un teléfono compatible. | No ejecutado |
+
+Para inspección GATT: UUID de descubrimiento/publicidad `0000BEEF-0000-1000-8000-00805f9b34fb`; servicio de chat `0000C4A7-0000-1000-8000-00805f9b34fb`; característica WRITE `00004D51-0000-1000-8000-00805f9b34fb`. Son UUID distintos por diseño; filtrar por BEEF no sustituye descubrir el servicio C4A7.
+
+Ficha a completar por intento: `caso/subcaso | fecha y hora | A/B modelo/API | APK SHA-256 | permisos/radios | texto exacto y bytes | acción/fallo inducido | estados A/B | escritura confirmada | recepción observada | duración local/método | evidencia A/B | aprobado/fallido/no ejecutado`. Para los envíos normales, predefinir como criterio 10/10 recepciones íntegras por dirección y el par simultáneo sin duplicados. Ese es un criterio del ensayo, **no una tasa medida**. No calcular latencia unidireccional restando relojes de teléfonos sin sincronización documentada.
+
+### Límites y dictamen para revisión
+
+- Ningún test actual ejercita `BLEMeshController` o `MeshScreen` sobre Android; el test instrumentado existente solo comprueba el nombre del paquete. Faltan observaciones reales de permisos, callbacks, radios, compatibilidad entre fabricantes, consumo y alcance. No se declara resuelto el Issue #1 con evidencia exclusivamente JVM.
+- GATT exitoso no equivale a ACK de aplicación, lectura ni persistencia. El receptor agrega el mensaje antes de responder GATT; si se pierde la respuesta puede haber recepción sin confirmación en el emisor. Reenviar puede duplicar contenido: no hay deduplicación en el chat directo.
+- La asociación entre dirección central/anunciante usa callsign observado único como alternativa, sin autenticación. Con scan detenido, peers aún no descubiertos, callsigns duplicados o direcciones rotativas, debe comprobarse que la recepción aparezca en el chat correcto. Por lectura, la lista elimina peers de más de 30 s solo al procesar un nuevo anuncio válido; sin nuevos resultados puede conservar entradas antiguas. No asumir que un peer listado siga conectado/disponible.
+- Callsign BLE se limita a **bytes**, mientras Ajustes valida caracteres alfanuméricos; un callsign Unicode aceptado por Ajustes puede exceder 8 bytes y ser rechazado por BLE. Usar ASCII en el ensayo base y registrar ese límite. La fórmula del texto es `20 - bytes(callsign) - 1`; sin fragmentación ni negociación de MTU.
+- Historial y borrador son de memoria/composición; no hay garantía de servicio en segundo plano. El núcleo mesh simulado preexistente continúa sin integración BLE; no se añadió ni activó multisalto.
+- **Cambios de esta intervención: solo este documento.** No se aplicaron correcciones de código BLE sin reproducción de un fallo; se conserva el cambio local previo del wrapper. El bloqueo de `./gradlew` con 9.7.1 queda identificado y la compilación válida se obtuvo mediante la instalación compatible, sin alterar ese archivo.
+- `git diff --check`: correcto. El cierre físico queda pendiente de completar las fichas con dos Android; conservar la evidencia de fallos y revisar antes de publicar. Este informe no publica cambios ni cierra el issue.
 
 ## Evidencia disponible y límites
 
@@ -11,18 +121,18 @@
 | [Informe del núcleo](Validacion-BeaconChat.md) | **48 tests totales reportados**, incluidos 31 del núcleo (22 motor + 9 topologías) y los 17 anteriores | GNSS, radio real, fragmentación, DTN, gateway, backend ni rescate |
 | [Código de tests del motor](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshEngineTest.kt) y [topologías](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshTopologyTest.kt) | Cadena, ruptura de enlace, triángulo, anillo, caminos duplicados, límites, TTL y expiración mediante red simulada | Probabilidades de pérdida, obstáculos, consumo y restricciones de un teléfono |
 | Señalización óptica/vibración/audio/QR/beacon BLE | Componentes presentes en código | Tasas de decodificación o funcionamiento garantizado bajo derrumbes |
-| Revisión documental de esta intervención | Consultar [INFORME-REVISION](INFORME-REVISION.md) | No es una ejecución nueva de los ensayos anteriores |
+| Revisión documental previa | Referencia histórica a `INFORME-REVISION.md` (archivo no presente en este checkout) | No acredita una ejecución de los ensayos anteriores |
 
-**No se volvió a ejecutar Gradle, APK, tests JVM ni pruebas físicas durante esta tarea documental.** Los 48 incluyen los 31, no son 48 + 31. El informe BLE también registra errores de Lint preexistentes en módulos ópticos; no se presenta un build completo libre de incidencias ni se modifica código para resolverlos.
+**La revisión documental previa no volvió a ejecutar Gradle, APK, tests JVM ni pruebas físicas.** La ejecución técnica nueva del 17/10/2026 se registra arriba. Los 48 incluyen los 31, no son 48 + 31. El informe BLE histórico también registra errores de Lint preexistentes en módulos ópticos; no se presenta una validación nueva de Lint ni se modifica código para resolverlos.
 
 ## Catálogo de pruebas
 
-Los IDs completos son `R26-PR-01` a `R26-PR-19`. Solo PR-19 se ejecuta como revisión documental de esta entrega; PR-01/02 tienen evidencia histórica limitada y el resto queda pendiente. Cada resultado futuro debe señalar simulación, laboratorio físico o campo.
+Los IDs completos son `R26-PR-01` a `R26-PR-19`. PR-19 corresponde a la revisión documental previa; PR-01/02 incorporan la ejecución JVM del 17/10/2026 y mantienen sus límites físicos. Cada resultado futuro debe señalar simulación, laboratorio físico o campo.
 
 | ID | Preparación y procedimiento | Criterio de aceptación / evidencia | Estado |
 | --- | --- | --- | --- |
-| R26-PR-01 | Ejecutar tests de protocolo/estado y protocolo manual A↔B del informe BLE: permisos, Unicode, 20 bytes exactos/exceso, desconexión, pausa y timeout. | Tests del protocolo correctos; ambos teléfonos registran texto íntegro, sin truncar ni éxito falso; guardar modelos/SO/logs. | JVM histórico reportado; físico pendiente |
-| R26-PR-02 | Revisar y reproducir suite del núcleo: cadena intacta/rota, TTL cero, triángulo/anillo/diamante, dedupe/colas/reloj y fallos de transporte. | Resultado lógico esperado y propagación termina; transporte no disponible consume intento sin reencolar ni ACK. | 31 JVM históricos reportados; sin nueva ejecución |
+| R26-PR-01 | Ejecutar tests de protocolo/estado y protocolo manual A↔B del informe BLE: permisos, Unicode, 20 bytes exactos/exceso, desconexión, pausa y timeout. | Tests del protocolo correctos; ambos teléfonos registran texto íntegro, sin truncar ni éxito falso; guardar modelos/SO/logs. | 13 protocolo + 3 estados JVM aprobados el 17/10/2026; físico pendiente |
+| R26-PR-02 | Revisar y reproducir suite del núcleo: cadena intacta/rota, TTL cero, triángulo/anillo/diamante, dedupe/colas/reloj y fallos de transporte. | Resultado lógico esperado y propagación termina; transporte no disponible consume intento sin reencolar ni ACK. | 31 JVM aprobados el 17/10/2026; simulación sin radio |
 | R26-PR-03 | En dispositivos compatibles, probar cada emisor/receptor óptico, vibración, audio, QR y beacon; registrar luz/ruido/acoplamiento, permisos y detención. | Emisión/decodificación observada por canal y condición; errores y limitaciones explícitos, sin atribuir alcance genérico ni geolocalización al beacon. | Pendiente físico |
 | R26-PR-04 | Con implementación futura, registrar SOS sintéticos válidos/invalidables y doble toque/reintento. | Esquema validado, ID/carga estable para reintentos, sin incidente accidental doble; nota/límites UTF-8 comprobados. | Pendiente |
 | R26-PR-05 | Desactivar datos/Wi-Fi; ensayar GNSS al aire libre y en interior, con permisos, proveedor apagado y límite de espera configurado. Registrar tiempo hasta fix y precisión reportada. | No exige Internet, captura/edad/fuente visibles; timeout no fabrica posición ni bloquea SOS. No exigir fix en toda condición. | Pendiente físico |
@@ -51,7 +161,7 @@ El objetivo de PR-08 es un umbral de laboratorio propuesto para hacer falsable l
 4. Ejecutar casos normales y fallos del catálogo; conservar todos los intentos. Para el umbral PR-08 usar 10 intentos declarados; para estimaciones estadísticas posteriores justificar una muestra mayor y sus intervalos.
 5. Comparar con criterios predefinidos, registrar desviaciones y repetir únicamente tras cambios identificados. Asignar a un revisor el dictamen de cada prueba.
 
-Comandos de reproducción JVM, **no ejecutados en esta intervención**, para un entorno ya preparado con JDK/SDK/dependencias del proyecto:
+Comandos de reproducción JVM propuestos en la revisión documental previa, **no ejecutados con estas invocaciones en la validación actual**, para un entorno ya preparado con wrapper compatible/JDK/SDK/dependencias del proyecto (ver arriba el comando alternativo efectivamente usado):
 
 ```bash
 ./gradlew testDebugUnitTest --tests 'com.nicobutter.beaconchat.mesh.core.*'
@@ -76,7 +186,7 @@ No usar esos comandos como prueba de radio ni agregar aquí dependencias para en
 
 Ficha para cada ensayo: `ID de prueba | fecha | responsable/revisor | versión | entorno/topología | datos sintéticos | esperado | observado | métricas/método | evidencia | desvíos | resultado (aprobado/fallido/no ejecutado)`.
 
-No hay valores observados nuevos para estas métricas de sistema. La aprobación documental de PR-19 no cambia el estado P del producto integral ni el carácter S de las topologías existentes.
+No hay valores observados nuevos para estas métricas de sistema. La aprobación documental de PR-19 y la ejecución JVM del 17/10/2026 no cambian el estado P del producto integral ni el carácter S de las topologías existentes.
 
 
 ---
