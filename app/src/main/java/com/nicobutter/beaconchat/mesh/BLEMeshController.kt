@@ -15,8 +15,10 @@ import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import com.nicobutter.beaconchat.mesh.ble.AndroidMeshTransport
+import com.nicobutter.beaconchat.mesh.transport.MeshGattContract
 
-/** Direct BLE only. All mutable hardware/session state is serialized on the main looper. */
+/** Legacy direct chat plus opt-in experimental mesh. Hardware/session state is on the main looper. */
 @Suppress("DEPRECATION", "MissingPermission")
 class BLEMeshController(context: Context) {
     private val context = context.applicationContext
@@ -36,6 +38,15 @@ class BLEMeshController(context: Context) {
     private var advertisingTimeout: Runnable? = null
     private var receiverRegistered = false
     private var activeSend: Send? = null
+    val experimentalMesh = AndroidMeshTransport(this.context).also { mesh ->
+        mesh.cancelServerConnection = { address ->
+            try { adapter?.getRemoteDevice(address)?.let { server?.cancelConnection(it) } } catch (_: Exception) { }
+        }
+    }
+
+    fun setMeshParticipation(enabled: Boolean) {
+        if (!enabled || ready()) experimentalMesh.setEnabled(enabled)
+    }
 
     private val _peers = MutableStateFlow<List<MeshPeer>>(emptyList())
     val peers = _peers.asStateFlow()
@@ -135,6 +146,11 @@ class BLEMeshController(context: Context) {
                 if (generation == advertisingGeneration) advertisingFailed("Tiempo agotado al iniciar publicidad/GATT")
             }.also { handler.postDelayed(it, 10_000) }
             val serverCallback = object : BluetoothGattServerCallback() {
+                override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) { handler.post {
+                    if (generation == advertisingGeneration && (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS)) {
+                        experimentalMesh.serverDisconnected(device.address)
+                    }
+                } }
                 override fun onServiceAdded(status: Int, service: BluetoothGattService?) { handler.post {
                     if (generation != advertisingGeneration) return@post
                     if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -157,6 +173,20 @@ class BLEMeshController(context: Context) {
                     characteristic: BluetoothGattCharacteristic, preparedWrite: Boolean,
                     responseNeeded: Boolean, offset: Int, value: ByteArray) { handler.post {
                     if (generation != advertisingGeneration) return@post
+                    if (characteristic.uuid == MeshGattContract.CHARACTERISTIC_UUID || characteristic.uuid == MeshGattContract.IDENTITY_UUID) {
+                        val meshStatus = when {
+                            preparedWrite || !responseNeeded -> BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
+                            offset != 0 -> BluetoothGatt.GATT_INVALID_OFFSET
+                            value.size !in 1..20 -> BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH
+                            else -> try {
+                                if (experimentalMesh.serverWrite(device.address, characteristic.uuid, value)) BluetoothGatt.GATT_SUCCESS
+                                else BluetoothGatt.GATT_FAILURE
+                            } catch (_: Exception) { BluetoothGatt.GATT_FAILURE }
+                        }
+                        try { if (responseNeeded) server?.sendResponse(device, requestId, meshStatus, offset, null) }
+                        catch (_: Exception) { _lastError.value = "No se pudo responder al canal mesh" }
+                        return@post
+                    }
                     var packet: DirectBleProtocol.Packet? = null
                     val status = when {
                         characteristic.uuid != messageUuid -> BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
@@ -183,6 +213,22 @@ class BLEMeshController(context: Context) {
                         }
                     } catch (e: Exception) { _lastError.value = "Error de recepción: ${e.message}" }
                 } }
+                override fun onCharacteristicReadRequest(device: BluetoothDevice, requestId: Int, offset: Int,
+                    characteristic: BluetoothGattCharacteristic) { handler.post {
+                    if (generation != advertisingGeneration) return@post
+                    var response: ByteArray? = null
+                    val status = when {
+                        characteristic.uuid != MeshGattContract.CHARACTERISTIC_UUID && characteristic.uuid != MeshGattContract.IDENTITY_UUID ->
+                            BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
+                        offset != 0 -> BluetoothGatt.GATT_INVALID_OFFSET
+                        else -> try {
+                            response = experimentalMesh.serverRead(device.address, characteristic.uuid)
+                            if (response != null) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
+                        } catch (_: Exception) { BluetoothGatt.GATT_FAILURE }
+                    }
+                    try { server?.sendResponse(device, requestId, status, offset, response) }
+                    catch (_: Exception) { _lastError.value = "No se pudo responder a lectura mesh" }
+                } }
                 override fun onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) { handler.post {
                     if (generation == advertisingGeneration) try {
                         server?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null)
@@ -194,12 +240,18 @@ class BLEMeshController(context: Context) {
             val service = BluetoothGattService(chatUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY)
             service.addCharacteristic(BluetoothGattCharacteristic(messageUuid,
                 BluetoothGattCharacteristic.PROPERTY_WRITE, BluetoothGattCharacteristic.PERMISSION_WRITE))
+            for (uuid in listOf(MeshGattContract.CHARACTERISTIC_UUID, MeshGattContract.IDENTITY_UUID)) {
+                service.addCharacteristic(BluetoothGattCharacteristic(uuid,
+                    BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE,
+                    BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE))
+            }
             check(server!!.addService(service)) { "No se pudo iniciar registro GATT" }
         } catch (e: Exception) { advertisingFailed(e.message ?: "Error iniciando publicidad") }
     }
 
     private fun advertisingFailed(message: String) {
         stopAdvertising()
+        experimentalMesh.setEnabled(false)
         _lastError.value = message
     }
 
@@ -209,6 +261,7 @@ class BLEMeshController(context: Context) {
         advertisingTimeout = null
         try { advertisingCallback?.let { advertiser?.stopAdvertising(it) } } catch (_: Exception) { }
         try { server?.close() } catch (_: Exception) { }
+        experimentalMesh.serverStopped()
         advertisingCallback = null
         advertisedCallsign = null
         advertiser = null
@@ -237,6 +290,7 @@ class BLEMeshController(context: Context) {
                     val name = try { DirectBleProtocol.decodeCallsign(bytes) } catch (_: Exception) { return@post }
                     val peer = MeshPeer(result.device.address, "BeaconChat BLE", name, result.rssi, System.currentTimeMillis())
                     _peers.update { list -> list.filter { it.id != peer.id && System.currentTimeMillis() - it.lastSeen < 30_000 } + peer }
+                    experimentalMesh.discovered(peer.id)
                 } }
                 override fun onScanFailed(errorCode: Int) { handler.post {
                     if (scanningCallback === this) {
@@ -274,12 +328,17 @@ class BLEMeshController(context: Context) {
 
     fun sendMessage(peerAddress: String, message: String, myCallsign: String) {
         if (activeSend != null || !ready()) return
+        if (experimentalMesh.outgoingBusy) {
+            _lastError.value = "Enlace mesh ocupado; esperá su finalización para enviar chat directo"
+            return
+        }
         val operation = try { Send(peerAddress, DirectBleProtocol.callsign(myCallsign), message,
             DirectBleProtocol.encode(myCallsign, message)) } catch (e: Exception) {
             _lastError.value = e.message ?: "Mensaje inválido"
             return
         }
         activeSend = operation
+        experimentalMesh.setDirectBusy(true)
         _isSending.value = true
         _lastError.value = null
         _connectionStatus.value = "Conectando…"
@@ -334,12 +393,13 @@ class BLEMeshController(context: Context) {
         operation.timeout?.let(handler::removeCallbacks)
         try { operation.gatt?.disconnect() } catch (_: Exception) { }
         try { operation.gatt?.close() } catch (_: Exception) { }
+        experimentalMesh.setDirectBusy(false)
         _isSending.value = false
         _lastError.value = error
         _connectionStatus.value = if (error == null) "Escritura GATT confirmada (sin ACK de aplicación)" else "Sin conexión"
     }
 
     fun cancelSend() { activeSend?.let { finish(it, "Envío cancelado; recepción sin confirmar") } }
-    fun stop() { cancelSend(); stopScanning(); stopAdvertising() }
+    fun stop() { experimentalMesh.setEnabled(false); cancelSend(); stopScanning(); stopAdvertising() }
     fun cleanup() { pause() }
 }

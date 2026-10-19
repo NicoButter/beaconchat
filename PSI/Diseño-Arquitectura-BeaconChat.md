@@ -5,23 +5,25 @@
 
 ## Base verificable y fuentes locales
 
-Base del checkout `604d9898b6fa132a8b35ca81ef60752de4a0305b` de `main`, con transporte binario agregado el 18/10/2026. Las rutas siguientes sustentan el estado; el nombre `BLEMeshController` o `LightMapScreen` no demuestra mesh multisalto ni mapas geográficos.
+Base del checkout `ac1dd8983960f6500b95433d40d6d390b5a9ebb3` de `main`, con integración mesh Android experimental agregada el 18/10/2026. Las rutas siguientes sustentan el estado; el código de multisalto y sus pruebas JVM no demuestran funcionamiento físico, y `LightMapScreen` no demuestra mapas geográficos.
 
 | Fuente | Evidencia |
 | --- | --- |
 | [MainActivity](../app/src/main/java/com/nicobutter/beaconchat/MainActivity.kt), [MeshScreen](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/MeshScreen.kt) | Activity/Composables, coordinación de controladores, permisos y ciclo de vida. MainActivity deriva de ComponentActivity; no se identifica como una clase ViewModel. |
-| [BLEMeshController](../app/src/main/java/com/nicobutter/beaconchat/mesh/BLEMeshController.kt), [DirectBleProtocol](../app/src/main/java/com/nicobutter/beaconchat/mesh/DirectBleProtocol.kt) | Advertising/scanning y cliente/servidor GATT directo; máximo 20 bytes totales. |
+| [BLEMeshController](../app/src/main/java/com/nicobutter/beaconchat/mesh/BLEMeshController.kt), [DirectBleProtocol](../app/src/main/java/com/nicobutter/beaconchat/mesh/DirectBleProtocol.kt) | Advertising/scanning y chat GATT directo intacto, 20 bytes; características mesh separadas, activas solo por participación explícita. |
 | [MeshMessage](../app/src/main/java/com/nicobutter/beaconchat/mesh/core/MeshMessage.kt), [MeshEngine](../app/src/main/java/com/nicobutter/beaconchat/mesh/core/MeshEngine.kt) | Modelo lógico, TTL, dedupe y cola; sin tareas de red ni persistencia. |
-| [Codec](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshMessageCodec.kt), [fragmentación](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshFragmentProtocol.kt), [reensamblador](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshReassembler.kt) | Transporte binario V1 independiente de Android, tramas ≤20 bytes y recursos acotados; contrato GATT reservado sin activar. |
+| [Codec](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshMessageCodec.kt), [fragmentación](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshFragmentProtocol.kt), [reensamblador](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshReassembler.kt) | Transporte binario V1 independiente de Android, tramas ≤20 bytes y recursos acotados; formato sin cambios. |
+| [MeshBleNode](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/MeshBleNode.kt), [MeshGattClient](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/MeshGattClient.kt), [MeshLinkProtocol](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/MeshLinkProtocol.kt), [AndroidMeshTransport](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/AndroidMeshTransport.kt) | Adaptador con cola, identidad declarada por sesión y escrituras/recibos secuenciales; puente BluetoothGatt real compilado, política compartida con pruebas JVM. |
 | [Pruebas de topologías](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshTopologyTest.kt), [red simulada](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/SimulatedNetwork.kt) | Transporte simulado JVM; no uso del stack Bluetooth físico. |
 | [Integración de transporte](../app/src/test/java/com/nicobutter/beaconchat/mesh/transport/MeshTransportIntegrationTest.kt) | Topologías JVM que serializan, fragmentan, reensamblan y decodifican en cada enlace antes de entregar al motor. |
+| [Pruebas del adaptador](../app/src/test/java/com/nicobutter/beaconchat/mesh/ble/MeshBleAdapterTest.kt) | Mismo adaptador de producción, I/O GATT falso: cadena sin A↔C, diamante/anillo, fallos, cuotas y reconexión. No ejecuta el stack Android. |
 | [EmergencyManager](../app/src/main/java/com/nicobutter/beaconchat/controller/EmergencyManager.kt), [BleEmitter](../app/src/main/java/com/nicobutter/beaconchat/emitter/BleEmitter.kt), [BleScanner](../app/src/main/java/com/nicobutter/beaconchat/scanner/BleScanner.kt) | Orquestación de señales y beacon SOS con un byte de tipo de emergencia. No transmite incidente ni coordenadas. |
 | [Transmisor](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/TransmitterScreen.kt), [receptor QR](../app/src/main/java/com/nicobutter/beaconchat/transceiver/QRScanner.kt), [detectores](../app/src/main/java/com/nicobutter/beaconchat/transceiver/LightDetector.kt) | Componentes ópticos/Morse, QR y otros canales locales, con validación física insuficiente. |
 | [UserPreferences](../app/src/main/java/com/nicobutter/beaconchat/data/UserPreferences.kt) | Callsign en DataStore; no repositorio durable de SOS. |
 | [Gradle de app](../app/build.gradle.kts), [manifiesto](../app/src/main/AndroidManifest.xml) | SDK 24/34, BLE y permisos. Ubicación hasta API 30 para scan BLE; sin permiso INTERNET ni servicio de incidentes. |
 | [Informe BLE](Validacion-BeaconChat.md), [informe del núcleo](Validacion-BeaconChat.md) | Resultados históricos reportados; no se reinterpretan como ensayos nuevos. |
 
-El `LocationManager` del controlador BLE solo comprueba proveedores habilitados para escaneo en Android anterior a 12. Esa comprobación no obtiene ni georreferencia un incidente. El análisis de fuentes no encontró componentes de GNSS para SOS, API/backend, mapas, LoRa o integración activa entre MeshEngine y BLE.
+El `LocationManager` del controlador BLE solo comprueba proveedores habilitados para escaneo en Android anterior a 12. Esa comprobación no obtiene ni georreferencia un incidente. No hay componentes de GNSS para SOS, API/backend, mapas o LoRa. La integración MeshEngine↔BLE ahora existe como código experimental, con validación física pendiente.
 
 ## Arquitectura AS-IS
 
@@ -34,13 +36,17 @@ flowchart TB
     EM --> SIG["E: luz, vibración, audio y beacon SOS"]
     RX --> SENSOR["E: CameraX, acelerómetro, QR y BLE scanner"]
     BC --> RADIO["E: advertising, scan y GATT A-B"]
-    CORE["S: MeshEngine y MeshMessage<br/>lógica sin Android"] --> WIRE["S: codec V1, fragmentador<br/>y reensamblador sin Android"]
+    BC --> ANDROID["E: AndroidMeshTransport<br/>GATT real, opt-in"]
+    ANDROID <--> POLICY["E/S: MeshBleNode y MeshGattClient<br/>colas, identidad y sesiones"]
+    ANDROID <--> RADIO
+    POLICY <--> CORE["E/S: MeshEngine y MeshMessage<br/>lógica sin Android"]
+    POLICY <--> WIRE["E/S: codec V1, fragmentador<br/>y reensamblador sin Android"]
     WIRE --> TEST["S: integración y topologías JVM"]
+    POLICY --> TEST
     CORE --> OLDTEST["S: SimulatedNetwork / tests del núcleo"]
-    CORE -. "sin integración" .-> BC
 ```
 
-La separación es descriptiva de componentes reales, no una declaración de Clean Architecture/MVVM completo. El chat guarda peers/mensajes en memoria. Los controladores se detienen según navegación/pausa; no existe un servicio probado que sostenga la futura mesh con pantalla bloqueada.
+La separación es descriptiva de componentes reales, no una declaración de Clean Architecture/MVVM completo. E indica código existente y S evidencia por simulación; ninguno acredita por sí solo radio probada. El chat y la mesh experimental guardan mensajes/colas en memoria. Los controladores se detienen según navegación/pausa; no hay servicio que sostenga esta mesh con pantalla bloqueada.
 
 ### Transporte directo y núcleo lógico
 
@@ -61,15 +67,21 @@ El callback de escritura GATT solo confirma esa operación; no lectura, ACK de a
 
 La deduplicación es temporal, no exactamente-una-vez durable. No hay store-and-forward/DTN persistente en ese núcleo. Sus límites no son parámetros de capacidad ya validados para una catástrofe.
 
-### Transporte binario implementado, todavía sin radio
+### Transporte binario y adaptador Android experimental
 
 El envelope V1 serializa UUID lógicos, destino opcional, TTL y contenido UTF-8 estricto: **37 + L bytes broadcast / 53 + L unicast**, hasta 1024 bytes de contenido. No modifica ningún campo en un round-trip; el motor conserva la responsabilidad de descontar TTL una sola vez por salto lógico. El perfil de transporte admite TTL 0..16.
 
 Las tramas tienen hasta **20 bytes**, con 12 de cabecera y hasta 8 de payload. Incluyen marcador binario, versión, ID de transferencia local al enlace, índice, cantidad, longitud total y CRC32 del envelope. El máximo unicast requiere 135 tramas. El reensamblador separa sesiones de conexión de identidades permanentes, admite desorden/duplicados idénticos y limita transferencias activas, entradas cerradas, memoria y duración; únicamente una carga completa, con CRC correcto y validada por el codec puede pasar al motor. CRC32 comprueba corrupción accidental del conjunto: **no equivale a autenticación ni cifrado**.
 
-Se reserva una característica mesh propia mediante `MeshGattContract`; no se registra ni anuncia. El chat directo sigue usando exclusivamente su protocolo UTF-8 anterior. No se identifican nodos por MAC/callsign ni se interpreta texto legacy como fragmentos. Un futuro adaptador deberá administrar sesiones e IDs de transferencia, descubrir explícitamente el canal, acotar sus colas y proveer la identidad lógica del vecino.
+`MeshGattContract` registra dos características READ/WRITE propias en C4A7: datos/recibos `…b501` e identidad/capacidades `…b502`, rechazadas mientras la participación esté apagada. El advertising y la característica legacy permanecen con su formato anterior. Los candidatos detectados por scan se sondean mediante descubrimiento GATT y hello versionado de 20 bytes. Su NodeId declarado se asocia a la sesión, se verifica antes de cada envío y se usa como `previousHop`; MAC y callsign no identifican permanentemente al nodo. El UUID local se persiste en preferencias privadas mediante IO antes de permitir participar. Ese intercambio no autentica la identidad.
 
-El [contrato completo, cuotas y evidencia](Validacion-BeaconChat.md) registra **110 tests JVM aprobados**, incluidos 62 nuevos de transporte/integración. No hay adaptador GATT activo, fiabilidad mediante ACK/reintentos ni prueba física del transporte; A↔B continúa pendiente. Los componentes lógicos y el transporte no se invocan desde `BLEMeshController` ni `MeshScreen`.
+`MeshBleNode` es dueño del motor y del reensamblador. El motor autoriza copias, decrementa TTL una vez y pasa el fanout a una cola local atómica y acotada. `MeshGattClient` conecta con un solo vecino por vez, intercambia identidades y alterna WRITE de trama / READ del recibo correlacionado por transferencia, índice y CRC. Solo después avanza. `AndroidMeshTransport` implementa esas operaciones con BluetoothGatt asíncrono y callbacks serializados en main; no bloquea esperando radio o disco. El servidor reconstruye, verifica CRC y codec, entrega al motor y encola las copias autorizadas hacia otros NodeId. Chat directo y mesh arbitran el cliente saliente.
+
+Hay hasta 16 vecinos, 8 trabajos incluyendo el activo, 8 sesiones entrantes y 32 eventos de historial; los límites del reensamblador se mantienen. Existen timeouts por operación, transferencia, cola y conexión; desconexión, cancelación y pausa liberan sesiones y descartan cargas parciales. Los callbacks de conexiones anteriores se ignoran, y un recibo antiguo no permite saltar de trama. No hay recuperación automática de mensajes perdidos ni custodia persistente.
+
+El diálogo “Mesh experimental” de `MeshScreen` permite activar/desactivar participación, originar pruebas con destino opcional y TTL, copiar NodeId y consultar vecinos/actividad. La participación mantiene scan/publicidad en primer plano y se desactiva al pausar/salir. La UI distingue origen local, cola local, escrito en enlace y recibido localmente. **Handoff y recibo de trama no confirman el destino final.** No hay ACK extremo a extremo, autenticación ni cifrado.
+
+El [contrato completo, cuotas, resultados y procedimiento de tres Android](Validacion-BeaconChat.md) registra **144 tests JVM aprobados**, incluidos 34 nuevos del adaptador. La ruta Android/GATT está implementada y compilada; su ejecución física A↔B y A→B→C continúa pendiente. No se agregan GPS, gateway, servidor ni mapas.
 
 ## Arquitectura TO-BE, íntegramente propuesta
 
@@ -94,11 +106,11 @@ Cada teléfono compatible podría ser origen/retransmisor/gateway según conecti
 
 ### Integración, seguridad y presupuesto de bytes
 
-Se conserva el chat directo; formato, tamaños y pruebas del transporte lógico V1 ya están implementados arriba. La integración GATT deberá descubrir explícitamente una característica mesh separada. El mensaje SOS rico sigue siendo una propuesta: excederá el presupuesto directo con UUID, tiempos, posición y protección; no se enviará como texto truncado en `CALLSIGN:MENSAJE`.
+Se conserva el chat directo; transporte V1 y adaptador Android experimental ya están implementados arriba con descubrimiento explícito de características mesh separadas. El mensaje SOS rico sigue siendo una propuesta: excederá el presupuesto directo con UUID, tiempos, posición y protección; no se enviará como texto truncado en `CALLSIGN:MENSAJE`.
 
 El serializer V1 usa **53 + L bytes** unicast: con `HOLA` son 57, aun sin ubicación ni criptografía. Su fragmentador genera 8 tramas para ese mensaje. El presupuesto SOS futuro deberá sumar datos de dominio y protección, y revisar el límite actual de 1024 bytes de contenido. El reensamblador existente incorpora índices, cantidad, longitud total, CRC32, timeout y cuotas por sesión/globales; la pérdida de un fragmento impide entregar al núcleo, pero no desencadena recuperación automática.
 
-El adaptador asíncrono necesitará backpressure y coordinación serializada con MeshEngine; conservará el TTL del mensaje despachado por el motor, que ya lo descuenta una vez por salto lógico. Ningún fragmento descuenta TTL. No podrá asumir que su puerto síncrono equivale a recepción por Bluetooth. Se evaluarán pruebas con peers legados y fallos parciales antes de conectar la UI.
+El adaptador actual aplica backpressure mediante cola acotada y coordina llamadas serializadas al motor; conserva el TTL ya descontado por este. Ningún fragmento descuenta TTL. Aceptar el puerto síncrono solo admite la cola local. La UI experimental está conectada y rotula estados sin promesa de destino final; faltan ensayos de radio, peers legados y fallos parciales sobre teléfonos antes de atribuir funcionamiento físico.
 
 Se propone un cuerpo SOS inmutable protegido hasta el centro, con metadatos mínimos de tránsito separados. El TTL mutable requiere reglas y controles antiabuso propios: proteger el cuerpo no impide que un nodo malicioso intente restaurar TTL. Identidad lógica no equivale a autenticación. Provisión/revocación de claves, cifrado offline hacia el centro y autenticación de emisores no están resueltos ni se elige aquí un protocolo criptográfico ad hoc.
 
@@ -267,14 +279,14 @@ Es la vista de conocimiento de un nodo, no el estado global del rescate. El cent
 
 | Decisión de diseño | Propuesta y consecuencia | Pendiente antes de código/operación |
 | --- | --- | --- |
-| AD-01 · BLE como cadena mínima | Reutilizar componentes, separar chat legado y mesh; no requerir LoRa | Codec/fragmentos/límites V1 implementados en JVM; faltan adaptador GATT, descubrimiento del canal y ensayos físicos |
+| AD-01 · BLE como cadena mínima | Reutilizar componentes, separar chat legado y mesh; no requerir LoRa | Codec/fragmentos y adaptador GATT experimental implementados; faltan ensayos físicos y diseño de fiabilidad/identidad segura |
 | AD-02 · Ubicación honesta | GNSS independiente de Internet; manual/sin fix permitidos | Espera máxima, umbral de dato reciente, política de precisión |
 | AD-03 · Confirmar solo persistencia | Comprobante autenticable y dedupe central | Contrato API, errores, retorno mesh y conflicto de mismo ID |
 | AD-04 · Custodia separada del núcleo | No convertir FIFO temporal en promesa DTN | Retención, cuotas, recuperación, TTL e idempotencia tras reinicio |
 | AD-05 · Datos mínimos protegidos | Relays sin acceso innecesario a coordenadas/notas | Amenazas, claves offline, revocación, consentimiento y acceso |
 | AD-06 · Centro de laboratorio primero | Clasificación humana, datos sintéticos; mapas solo si hay datos válidos | Responsable de operación, licencias cartográficas, integración oficial futura |
 
-Las decisiones de SOS/centro son propuestas, no ADR históricos aprobados. El transporte V1 descrito en AS-IS sí está implementado y probado en JVM. No se añaden dependencias, permisos, servicios Android ni integración de radio en esta intervención.
+Las decisiones de SOS/centro son propuestas, no ADR históricos aprobados. El transporte V1 y la política del adaptador están probados en JVM; el puente Android/GATT está implementado y compilado, sin resultado físico todavía. No se añaden dependencias, permisos ni servicios Android en esta intervención.
 
 
 ---

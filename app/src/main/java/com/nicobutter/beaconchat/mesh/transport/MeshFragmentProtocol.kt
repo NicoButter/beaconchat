@@ -4,9 +4,11 @@ import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.zip.CRC32
 
-/** Reserved for a FUTURE dedicated GATT characteristic. Not registered or used by the BLE chat. */
+/** Separate experimental mesh channels; legacy chat never reads or writes these characteristics. */
 object MeshGattContract {
     val CHARACTERISTIC_UUID: UUID = UUID.fromString("7d2ea28a-f7bd-4f56-9e75-6e57c1e9b501")
+    val IDENTITY_UUID: UUID = UUID.fromString("7d2ea28a-f7bd-4f56-9e75-6e57c1e9b502")
+    val SERVICE_UUID: UUID = UUID.fromString("0000C4A7-0000-1000-8000-00805f9b34fb")
 }
 
 /**

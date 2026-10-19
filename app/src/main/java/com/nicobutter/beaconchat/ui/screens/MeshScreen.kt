@@ -8,6 +8,9 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,6 +42,10 @@ import com.nicobutter.beaconchat.data.UserPreferences
 import com.nicobutter.beaconchat.mesh.BLEMeshController
 import com.nicobutter.beaconchat.mesh.ChatMessage
 import com.nicobutter.beaconchat.mesh.MeshPeer
+import com.nicobutter.beaconchat.mesh.ble.MeshBleSnapshot
+import com.nicobutter.beaconchat.mesh.ble.MeshActivityKind
+import com.nicobutter.beaconchat.mesh.core.NodeId
+import java.util.UUID
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,6 +79,8 @@ fun MeshScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var resumed by remember { mutableStateOf(false) }
     val bluetoothEnabled by meshController.bluetoothEnabled.collectAsState()
+    val experimentalState by meshController.experimentalMesh.state.collectAsState()
+    var showExperimental by remember { mutableStateOf(false) }
 
     val callsign by userPreferences.callsign.collectAsState(initial = "UNKNOWN")
 
@@ -136,10 +145,10 @@ fun MeshScreen(
     var autoScanEnabled by remember { mutableStateOf(true) }
 
     var visibilityEnabled by remember { mutableStateOf(true) }
-    LaunchedEffect(hasPermissions, bluetoothEnabled, autoScanEnabled, visibilityEnabled, callsign, resumed) {
+    LaunchedEffect(hasPermissions, bluetoothEnabled, autoScanEnabled, visibilityEnabled, callsign, resumed, experimentalState.enabled) {
         if (hasPermissions && bluetoothEnabled && resumed) {
-            if (autoScanEnabled) meshController.startScanning() else meshController.stopScanning()
-            if (visibilityEnabled) meshController.startAdvertising(callsign) else meshController.stopAdvertising()
+            if (autoScanEnabled || experimentalState.enabled) meshController.startScanning() else meshController.stopScanning()
+            if (visibilityEnabled || experimentalState.enabled) meshController.startAdvertising(callsign) else meshController.stopAdvertising()
         } else meshController.stop()
     }
 
@@ -278,7 +287,7 @@ fun MeshScreen(
                                                 meshController.stopAdvertising()
                                             }
                                         },
-                                        enabled = hasPermissions && bluetoothEnabled
+                                        enabled = hasPermissions && bluetoothEnabled && !experimentalState.enabled
                                 )
                             }
                             
@@ -307,7 +316,7 @@ fun MeshScreen(
                                             autoScanEnabled = false
                                             meshController.stopScanning() 
                                         },
-                                        enabled = hasPermissions && bluetoothEnabled && scanRequested,
+                                        enabled = hasPermissions && bluetoothEnabled && scanRequested && !experimentalState.enabled,
                                         modifier = Modifier.weight(1f)
                                 ) {
                                     Icon(Icons.Default.Close, contentDescription = null)
@@ -319,7 +328,10 @@ fun MeshScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                OutlinedButton(onClick = { showExperimental = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Mesh experimental: ${if (experimentalState.enabled) "activo" else "inactivo"} · ${experimentalState.queued} en cola")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
 
                 if (lastError != null) {
                     Text(lastError!!, color = MaterialTheme.colorScheme.error)
@@ -395,6 +407,70 @@ fun MeshScreen(
             }
         }
     }
+    if (showExperimental) {
+        ExperimentalMeshDialog(experimentalState, hasPermissions && bluetoothEnabled && resumed,
+            onEnabled = meshController::setMeshParticipation,
+            onSend = { destination, text, ttl -> meshController.experimentalMesh.originate(destination, text, ttl) },
+            onDismiss = { showExperimental = false })
+    }
+}
+
+@Composable
+private fun ExperimentalMeshDialog(state: MeshBleSnapshot, available: Boolean,
+    onEnabled: (Boolean) -> Unit, onSend: (NodeId?, String, Int) -> Boolean, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("Prueba mesh sin Internet 🆘") }
+    var destination by remember { mutableStateOf("") }
+    var ttl by remember { mutableStateOf("3") }
+    var inputError by remember { mutableStateOf<String?>(null) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Mesh experimental") },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } },
+        text = {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Solo en primer plano. Al salir o pausar se desactiva. Mantiene publicidad y escaneo mientras participa.")
+                SelectionContainer { Text("NodeId local: ${state.nodeId?.value ?: "Inicializando…"}") }
+                Text("Identidades declaradas sin autenticar. Sin cifrado ni confirmación del destino final.")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Participar", Modifier.weight(1f))
+                    Switch(checked = state.enabled, onCheckedChange = onEnabled,
+                        enabled = available && state.nodeId != null)
+                }
+                Text("Estado local: ${state.phase} · cola ${state.queued}/8 · sesiones entrantes ${state.incoming}/8")
+                OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("Mensaje (máximo 1024 bytes UTF-8)") }, maxLines = 4)
+                OutlinedTextField(value = destination, onValueChange = { destination = it },
+                    label = { Text("Destino UUID; vacío = broadcast") }, maxLines = 2)
+                OutlinedTextField(value = ttl, onValueChange = { ttl = it }, label = { Text("Saltos (0..16)") }, singleLine = true)
+                Button(enabled = state.enabled, onClick = {
+                    try {
+                        val target = destination.trim().takeIf { it.isNotEmpty() }?.let { NodeId(UUID.fromString(it)) }
+                        val hops = ttl.toIntOrNull()
+                        require(hops != null && hops in 0..16) { "TTL debe estar entre 0 y 16" }
+                        inputError = if (onSend(target, text, hops)) null else "No admitido; consultá el estado local"
+                    } catch (e: IllegalArgumentException) { inputError = e.message ?: "Destino/TTL inválido" }
+                }) { Text("Originar prueba · sin confirmar") }
+                inputError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                Text("Vecinos (${state.neighbors.count { it.nodeId != null }} con mesh verificado)", fontWeight = FontWeight.Bold)
+                state.neighbors.forEach { neighbor ->
+                    SelectionContainer { Text("${neighbor.address}\n${neighbor.nodeId?.value ?: "Sin NodeId verificado"}\n${neighbor.state}") }
+                }
+                Text("Actividad local (últimos 8 eventos)", fontWeight = FontWeight.Bold)
+                state.events.takeLast(8).reversed().forEach { event ->
+                    val label = when (event.kind) {
+                        MeshActivityKind.ORIGINATED -> "Originado localmente"
+                        MeshActivityKind.LOCAL_RECEIVED -> "Recibido localmente"
+                        MeshActivityKind.QUEUED -> "En cola local"
+                        MeshActivityKind.LINK_WRITTEN -> "Escrito en enlace · no confirmado"
+                        MeshActivityKind.FAILURE -> "Fallo local · no confirmado"
+                        MeshActivityKind.INFO -> "Estado local"
+                    }
+                    SelectionContainer { Text("$label\n${event.detail}" + (event.message?.let {
+                        "\nOrigen: ${it.originId.value}\nMensaje: ${it.messageId.value} · TTL ${it.hopsRemaining}\n${it.content}"
+                    } ?: ""), color = if (event.kind == MeshActivityKind.FAILURE) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface) }
+                    Divider()
+                }
+            }
+        })
 }
 
 @Composable

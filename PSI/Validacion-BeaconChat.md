@@ -3,7 +3,109 @@
 **Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 18/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
 
-## Transporte mesh binario V1 · implementación y validación JVM · 18/10/2026
+## Integración Android mesh experimental · 18/10/2026
+
+**Resultado actual: recorrido Android/GATT implementado y APK debug compilada; 144 tests JVM aprobados (110 anteriores + 34 nuevos), 0 fallos, 0 errores y 0 omitidos. BLE físico A↔B y A→B→C no ejecutado.** `adb devices -l` devolvió una lista vacía al iniciar y al finalizar la validación. Las topologías automatizadas sustituyen el I/O Bluetooth por un GATT falso; no constituyen resultados de radio.
+
+Trabajo directamente en `main`, base `ac1dd8983960f6500b95433d40d6d390b5a9ebb3`, inicialmente limpia. Sin ramas, worktrees, commit ni push. No se agregan dependencias, permisos, GPS, gateway, servidor, mapas ni pantallas nuevas. Se preservan los protocolos directos y del beacon SOS; las secciones posteriores registran las iteraciones anteriores y sus límites de aquel momento. El formato binario V1 y sus cuotas siguen vigentes; el contrato GATT antes reservado ahora se registra y se habilita por participación explícita.
+
+### Arquitectura implementada y archivos
+
+| Archivo | Responsabilidad |
+| --- | --- |
+| [MeshBleNode.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/MeshBleNode.kt) | Un MeshEngine por NodeId local; vecinos, sesiones, reensamblador, admisión atómica del fanout, cola acotada e historial local |
+| [MeshGattClient.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/MeshGattClient.kt) | Máquina de estados síncrona sobre un puerto asíncrono; conexión, capacidades/identidad, escritura y recibo correlacionado de cada trama, timeout/cancelación |
+| [MeshLinkProtocol.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/MeshLinkProtocol.kt) | Hello versionado de 20 bytes, recibos de admisión por trama e IDs de transferencia sin reutilización dentro de la retención |
+| [AndroidMeshTransport.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/AndroidMeshTransport.kt) | BluetoothGatt real, callbacks API 24–32/33+, reloj monotónico, mantenimiento con Handler, identidad persistida en IO y StateFlow de la UI |
+| [BLEMeshController.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/BLEMeshController.kt) | Características mesh en el servicio existente, despacho separado de callbacks, descubrimiento desde scan y arbitraje con el envío directo |
+| [MeshFragmentProtocol.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshFragmentProtocol.kt) | Extensión de MeshGattContract con UUID del servicio y característica de identidad; formato de fragmentación sin cambios |
+| [MeshScreen.kt](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/MeshScreen.kt) | Diálogo experimental: participación, mensaje/destino/TTL, NodeId copiable, vecinos, errores y actividad local |
+| [MeshLinkProtocolTest.kt](../app/src/test/java/com/nicobutter/beaconchat/mesh/ble/MeshLinkProtocolTest.kt), [MeshGattClientTest.kt](../app/src/test/java/com/nicobutter/beaconchat/mesh/ble/MeshGattClientTest.kt), [MeshBleAdapterTest.kt](../app/src/test/java/com/nicobutter/beaconchat/mesh/ble/MeshBleAdapterTest.kt) | 34 tests nuevos con el mismo adaptador/máquina de estados usados por Android y un puerto GATT falso |
+| Este documento y [Arquitectura](Diseño-Arquitectura-BeaconChat.md) | Contratos, decisiones, resultados, límites y procedimiento físico pendiente |
+
+Recorrido de producción: `MeshScreen → MeshBleNode.originate → MeshEngine.dispatch → cola local → MeshGattClient → codec/fragmentador → BluetoothGatt WRITE → callback + READ de recibo → servidor GATT → MeshReassembler → codec → MeshEngine.receive(previousHop declarado) → cola del relay → otro vecino`. Solo MeshEngine descuenta TTL, una vez por salto lógico. La recepción deduplica por `(originId, messageId)`, conserva el origen original y excluye de la retransmisión el NodeId del salto anterior. Los tests verifican esta ruta en cadena, diamante y anillo.
+
+### Canales, capacidades e identidad de sesión
+
+Se conservan advertising BEEF, servicio C4A7 y característica directa 4D51, incluidos callsign y `CALLSIGN:MENSAJE`, UTF-8 estricto y máximo 20 bytes. No se modifica el beacon SOS. En el mismo servicio C4A7 se registran dos características independientes **READ + WRITE con respuesta**:
+
+- Datos/recibo mesh: **`7d2ea28a-f7bd-4f56-9e75-6e57c1e9b501`** (`MeshGattContract.CHARACTERISTIC_UUID`). WRITE recibe exclusivamente tramas V1; READ devuelve el recibo de la última trama admitida en esa sesión.
+- Identidad/capacidades: **`7d2ea28a-f7bd-4f56-9e75-6e57c1e9b502`** (`IDENTITY_UUID`). READ declara la identidad local; WRITE recibe la identidad del cliente de esa conexión.
+
+Las características están presentes cuando existe el servidor de chat, pero **rechazan tráfico mesh con la participación desactivada**. Así no se reinicia advertising ni se cambia el esquema GATT al tocar el interruptor. No se agregan UUID al anuncio legacy ni se excede su presupuesto: se descubren candidatos con el scan existente, luego se verifican ambas características, sus propiedades y el hello por GATT. Un peer legacy sin ellas queda sin capacidad mesh y conserva su chat directo.
+
+Hello de **20 bytes**, big endian: `FA | versiónHello=01 | versiónMeshMessage=01 | versiónFragmentos=01 | NodeId UUID128`. Se exige longitud exacta, versiones conocidas e identidad no nula. Se rechaza la identidad propia o un cambio de identidad dentro de una sesión ya asociada. Antes de enviar datos, el cliente lee el hello del servidor y escribe el suyo; una transferencia en cola exige que el NodeId remoto coincida con el verificado para ese vecino. El servidor no acepta tramas hasta recibir un hello válido y usa su NodeId declarado como `previousHop`, independientemente del origen del mensaje retransmitido.
+
+El NodeId local se genera con UUID aleatorio y se conserva en preferencias privadas `mesh_identity_v1/node_id`. Lectura y persistencia se realizan en `Dispatchers.IO`; no se permite participar antes de confirmar la persistencia. La MAC es únicamente un handle transitorio para conectar y localizar la sesión actual, y el callsign solo sirve al chat/discovery legacy. No se vinculan identidades lógicas mediante coincidencias de callsign o direcciones centrales/anunciantes.
+
+**Este intercambio valida formato y consistencia; no autentica criptográficamente la identidad.** Un vecino puede mentir sobre su UUID y sobre el origen de un envelope; suplantación/replay/DoS no están resueltos. CRC32 sigue siendo integridad accidental, no autenticación ni cifrado. Copiar/restaurar los datos privados puede duplicar una identidad; provisión, respaldo/recuperación y revocación requieren diseño posterior. No se atribuye confianza permanente a MAC, callsign ni UUID declarado.
+
+### Secuencia GATT, concurrencia y resultados
+
+Cada trabajo abre un cliente GATT, descubre capacidades, intercambia hello, envía como máximo un mensaje y cierra. Las tramas siguen limitadas a 20 bytes. Después de `onCharacteristicWrite` exitoso se solicita READ en la característica de datos. El recibo es la cabecera original de **12 bytes** (incluye transferencia, índice y CRC); solo una coincidencia exacta permite avanzar al siguiente fragmento. Lecturas de recibos antiguos se ignoran hasta el callback correcto o timeout. No se emite la siguiente escritura antes de esa comprobación.
+
+Esto contempla que [onCharacteristicWrite](https://developer.android.com/reference/android/bluetooth/BluetoothGattCallback#onCharacteristicWrite(android.bluetooth.BluetoothGatt,android.bluetooth.BluetoothGattCharacteristic,int)) no incorpora un ID de solicitud propio de la aplicación. Un callback de escritura tardío no puede saltar silenciosamente un fragmento: necesita además el recibo correspondiente. Si el stack rechaza una lectura por estar ocupado, falla explícitamente el trabajo. Los callbacks de otra conexión/token se descartan y se cierra su handle antiguo. En API 33+ se usan valores explícitos al escribir/leer; en API 24–32 el valor leído se copia antes de encolarlo al hilo principal.
+
+**El recibo significa admisión de una trama en el vecino de ese enlace, nunca ACK del destino final.** La UI separa originado localmente, admitido en cola local, escrito en el enlace y recibido localmente. Escrito en enlace lleva siempre “no confirmado”; no existe un estado de entrega final. Un relay puede haber recibido y aun fallar al reenviar. `MeshTransport.ACCEPTED` significa solo que el fanout entró completo en la cola local; cuando no hay vecinos o capacidad se registra el fallo y el motor consume ese intento.
+
+| Recurso / política | Límite actual |
+| --- | --- |
+| Vecinos descubiertos | 16 handles temporales; sin anuncios durante 30 s se eliminan; NodeId/capacidades se verifican por GATT |
+| Sondeos | Hasta 2 pendientes, más el activo; enfriamiento por vecino de 30 s; al liberar un lugar se continúa con candidatos ya detectados |
+| Cola saliente | **8 trabajos incluyendo el activo**, probes incluidos; fanout mayor que los lugares disponibles se rechaza sin admisión parcial |
+| Conexiones salientes | **Una por nodo**; chat directo y mesh se arbitran. Mientras el chat posee el enlace, mesh espera con límite de cola; un envío directo iniciado con mesh ocupado informa ese estado |
+| Espera en cola / conexión total | 30 s / 30 s |
+| Operación GATT / transferencia activa | 5 s / 14 s; comprobadas por mantenimiento cada segundo, sujeto al scheduling Android |
+| Sesiones mesh entrantes | 8; timeout de 20 s de inactividad o 30 s totales |
+| Historial experimental | 32 eventos en memoria; UI muestra los últimos 8 |
+| Reensamblador | Sin cambios: 8 activas globales, 2 por sesión, 32 entradas, 8616 bytes de payload reservado, 135 fragmentos y 15 s sin extensión |
+
+Los IDs de transferencia avanzan globalmente en el adaptador y no se reutilizan entre sus clientes GATT consecutivos. Tras consumir los 65536 IDs se exige una pausa de al menos 15 s desde el último antes de reiniciar el contador; un agotamiento causa fallo explícito. Cada sesión entrante tiene un token nuevo; desconexión, cierre del servidor, cancelación o expiración ejecutan `discardSession`. No hay buffers incompletos entregados al motor. El host también mantiene limpieza mientras participa, no solo al recibir tramas.
+
+Todas las mutaciones de Bluetooth/motor ocurren serializadas en el main looper; las operaciones GATT son asíncronas, sin esperas de radio ni disco en ese hilo. Al pausar/salir de MeshScreen o apagar Bluetooth se desactiva la participación, se cancelan trabajos y se cierran sesiones. Volver requiere activar otra vez. No hay servicio de fondo, persistencia de mensajes, reintento automático ni garantía de entrega. Los parámetros temporales y la sobrecarga de WRITE+READ por trama deberán medirse físicamente, especialmente con mensajes máximos de 135 tramas.
+
+### Validación ejecutada
+
+Antes de cambiar código se inspeccionaron controlador/UI, núcleo, codec, fragmentador, reensamblador, manifest y wrapper 8.13. La primera ejecución reutilizó resultados; se forzó después únicamente la tarea de test con `testDebugUnitTest --rerun assembleDebug`: **110 tests aprobados**, `BUILD SUCCESSFUL in 1s`. El sandbox bloqueó el lock de la caché Gradle; se ejecutó con acceso autorizado, sin cambiar el wrapper ni dependencias.
+
+Validación final con Temurin JDK 21.0.7+6:
+
+```bash
+JAVA_HOME=/home/lordcommander/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 \
+  ./gradlew testDebugUnitTest assembleDebug --console=plain
+```
+
+**BUILD SUCCESSFUL in 2s**, 44 tareas (7 ejecutadas, 37 actualizadas); test JVM ejecutado y APK debug recompilada. Las primeras 142 pruebas pasaron. Al ampliar a 144, el test de nueve vecinos detectó que el sondeo esperaba nuevos anuncios cuando su cola se llenaba; se corrigió la continuación de candidatos pendientes y las **144 pasaron**. Se mantienen advertencias previas de BuildConfig, Java source/target 8 y APIs obsoletas. No se ejecutó Lint ni instrumentación Android.
+
+| Suite nueva | Tests | Evidencia |
+| --- | ---: | --- |
+| `MeshLinkProtocolTest` | 5 | Hello/versiones/UUID y 20 bytes; recibos por transferencia/posición/CRC; agotamiento y retención de IDs; separación legacy |
+| `MeshGattClientTest` | 10 | Secuencia real de operaciones sobre puerto falso; callbacks repetidos/tardíos y tokens antiguos; recibos desfasados; identidades inválidas/cambiadas/propias; cancelación, desconexión y deadlines por fase/transferencia; ningún LINK_WRITTEN falso |
+| `MeshBleAdapterTest` | 19 | A→B→C sin A↔C con 1024 bytes UTF-8; TTL; B desconectado y recuperado; cadena/diamante/anillo; duplicados; pérdida/corrupción sin handoff válido; saturación y fanout atómico; reconexiones; arbitraje con legacy; límites de vecinos/sesiones/historial; envelope inválido con CRC correcto |
+| Regresión anterior | 110 | Protocolos directos, motor, codec, fragmentación y topologías previas |
+| **Total** | **144** | **0 fallos, 0 errores, 0 omitidos** |
+
+Evidencia local: `app/build/reports/tests/testDebugUnitTest/index.html`, XML `app/build/test-results/testDebugUnitTest/TEST-*.xml` y `app/build/outputs/apk/debug/app-debug.apk` (**12.194.123 bytes**, SHA-256 `7cb1c2c6e873c1a94502f4aae81e9e635d994a78201b5cbac94ff91209b86bf1`). Timestamp de la suite final del adaptador: **18/10/2026 23:04:46.125 UTC−03:00** (`2026-10-19T02:04:46.125Z`). Los tests usan las clases de política/estado de producción; **no ejecutan BluetoothGatt, Handler, preferencias Android ni radios reales**. El puente Android y Compose se validaron por compilación, y requieren comprobación de callbacks, permisos, ciclo de vida y coexistencia entre fabricantes en dispositivos.
+
+### Procedimiento controlado en tres Android — pendiente, no ejecutado
+
+Aplicar primero el procedimiento A↔B del informe directo inferior con participación mesh desactivada. Luego:
+
+1. Preparar A, B y C físicos con API 24+, scan y advertising conectable. Registrar modelo/API, serial ADB, responsable, fecha/zona, HEAD, SHA-256 de APK, permisos y configuración de radios. Instalar la misma APK sin desinstalar datos ni elegir automáticamente un equipo. Comandos futuros, reemplazando los tres seriales explícitos: `adb -s SERIE_A install -r app/build/outputs/apk/debug/app-debug.apk`, y equivalentes B/C. Capturar `adb -s SERIE_A logcat -v threadtime` y equivalentes; grabar también la actividad mostrada por la UI. Usar HCI/observador BLE si se atribuye un recorrido físico concreto.
+2. Modo avión en los tres; reactivar Bluetooth y verificar Wi-Fi/datos apagados. API 24–30 necesita Ubicación encendida para scan, sin obtener coordenadas. Mantener Mesh Radar en primer plano, callsigns ASCII distintos, y abrir “Mesh experimental” → “Participar” en los tres. Registrar/copiar los **NodeId completos**, distintos, y esperar a que los vecinos requeridos muestren “Mesh V1”. No basta observar un callsign o un anuncio.
+3. Ubicar/aislar radios para conservar A↔B y B↔C sin A↔C. Esperar al menos 30 s para eliminar vecinos antiguos y registrar la tabla de identidades/capacidades de cada equipo. **No usar solo RSSI, distancia nominal o ausencia momentánea en pantalla como prueba de aislamiento.** Como control negativo, enviar desde A un mensaje único al NodeId de C con **TTL=1**: B puede aceptar el enlace, debe agotar TTL y C no debe registrar esa clave. Si C lo recibe, hay un camino directo permitido por el ensayo y no puede acreditarse la cadena A→B→C.
+4. En A, destino = NodeId de C, **TTL=2**, texto sintético único `CADENA-01 sí 🆘`. Conservar originId/messageId visibles. Esperado: A “en cola” y luego “escrito en enlace · no confirmado”; B actividad de retransmisión con mismos UUID/texto/destino y TTL 0; C **“recibido localmente”**, mismos campos y TTL 0, una vez. La actividad de B no prueba por sí sola la recepción en C. Repetir C→B→A, y 10 intentos únicos por dirección esperando cada resultado; registrar también todos los fallidos. El objetivo provisional es 10/10 íntegros en la cadena estable, no una tasa ya medida.
+5. Desactivar la participación de B **antes** de originar una nueva clave en A. C no debe recibirla por esa topología; A debe mostrar fallo/no vecinos/timeout y conservar “no confirmado”, incluso si un enlace previo había sido exitoso. Esperar hasta 40 s para observar los límites del trabajo, sin convertir la ausencia de recibo final en una garantía universal de no recepción. Reactivar B, esperar redescubrimiento (sondeo con cooldown hasta 30 s) y originar **otro mensaje**: la cola anterior no se reintenta automáticamente.
+6. Repetir con broadcast, TTL 0, texto multibyte y 1024 bytes exactos; exceso rechazado sin truncar. Inducir desconexión durante fragmentación, Bluetooth off/on, salida/Home y revocación de permiso. Confirmar cancelación, sesiones liberadas y necesidad de reactivar participación. Con cliente BLE de prueba, inducir hello/tramas inválidos, offset/prepared write, recibo desfasado y callbacks/errores cuando la herramienta lo permita. Sin fallo realmente inducido, marcar el subcaso no ejecutado.
+7. Comprobar convivencia: chat directo A↔B con mesh activo y tras desactivarlo; envío directo durante enlace mesh ocupado informa espera sin falso éxito. Probar además con un peer de la versión legacy si se dispone de esa APK. Verificar el beacon SOS con su procedimiento previo y no confundir sus anuncios con los del chat/mesh. Registrar por separado lo observado; no asumir compatibilidad de radio por haber preservado el formato.
+
+Ficha por intento: `caso | hora local | modelos/API/seriales | APK/HEAD | radios/permisos | NodeId A/B/C | vecinos verificados/aislamiento | originId + messageId | destino/TTL/texto/bytes | acción/fallo | estados A/B/C | recepción local en destino | HCI/log/video | resultado`. Repetir retirando B para probar dependencia del relay; si no puede demostrarse la ausencia A↔C, informar “cadena física no aislada/no validada”.
+
+### Límites y próximos pasos
+
+La implementación Android está disponible para experimentar; la comunicación física sigue pendiente. No hay confirmación verificable del destino final, autenticación, cifrado, entrega durable ni recuperación automática. Sondeos/colas y deadlines favorecen límites explícitos y pueden descartar cargas con enlaces lentos o muchos vecinos. Validar primero A↔B y después el aislamiento A→B→C, medir tiempo por trama/consumo y comportamiento por fabricante, y decidir la política de fiabilidad e identidad segura con esa evidencia. El motor, codec, límites del reensamblador, formato legacy y beacon se mantienen; el alcance de esta iteración es su integración experimental.
+
+## Histórico: transporte mesh binario V1 · implementación y validación JVM · 18/10/2026
 
 **Resultado: 110 tests JVM aprobados (48 anteriores + 62 nuevos), 0 fallos, 0 errores y 0 omitidos; APK debug compilada.** Se cumple el recorrido `MeshMessage → codec → fragmentador → reensamblador → codec → MeshEngine` con enlaces simulados. **Esto no prueba BLE físico: la validación A↔B continúa pendiente.** No se ejecutaron pruebas instrumentadas ni se utilizaron teléfonos.
 
@@ -227,6 +329,7 @@ Ficha a completar por intento: `caso/subcaso | fecha y hora | A/B modelo/API | A
 | [Informe BLE directo](Validacion-BeaconChat.md) | **17 tests JVM reportados**: 13 protocolo, 3 estados y 1 original. Prueba A↔B pendiente; sin dispositivos en aquel informe | Stack Bluetooth, alcance, compatibilidad entre fabricantes ni mesh físico |
 | [Informe del núcleo](Validacion-BeaconChat.md) | **48 tests totales reportados**, incluidos 31 del núcleo (22 motor + 9 topologías) y los 17 anteriores | GNSS, radio real, fragmentación, DTN, gateway, backend ni rescate |
 | Transporte binario V1 (sección actual superior) | **110 tests totales aprobados el 18/10/2026**: 48 anteriores + 62 nuevos; fragmentación/reensamblado e integración lógica con MeshEngine | Adaptador GATT activo, radio física, fiabilidad/ACK, autenticación ni cifrado |
+| Integración Android mesh experimental (primera sección) | **144 tests totales aprobados el 18/10/2026**: 110 anteriores + 34 nuevos; adaptador Android compilado y política probada con GATT falso | Ejecución real de BluetoothGatt/Handler, permisos, radio A↔B/A→B→C, entrega final, autenticación ni cifrado |
 | [Código de tests del motor](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshEngineTest.kt) y [topologías](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshTopologyTest.kt) | Cadena, ruptura de enlace, triángulo, anillo, caminos duplicados, límites, TTL y expiración mediante red simulada | Probabilidades de pérdida, obstáculos, consumo y restricciones de un teléfono |
 | Señalización óptica/vibración/audio/QR/beacon BLE | Componentes presentes en código | Tasas de decodificación o funcionamiento garantizado bajo derrumbes |
 | Revisión documental previa | Referencia histórica a `INFORME-REVISION.md` (archivo no presente en este checkout) | No acredita una ejecución de los ensayos anteriores |
@@ -245,7 +348,7 @@ Los IDs completos son `R26-PR-01` a `R26-PR-19`. PR-19 corresponde a la revisió
 | R26-PR-04 | Con implementación futura, registrar SOS sintéticos válidos/invalidables y doble toque/reintento. | Esquema validado, ID/carga estable para reintentos, sin incidente accidental doble; nota/límites UTF-8 comprobados. | Pendiente |
 | R26-PR-05 | Desactivar datos/Wi-Fi; ensayar GNSS al aire libre y en interior, con permisos, proveedor apagado y límite de espera configurado. Registrar tiempo hasta fix y precisión reportada. | No exige Internet, captura/edad/fuente visibles; timeout no fabrica posición ni bloquea SOS. No exigir fix en toda condición. | Pendiente físico |
 | R26-PR-06 | Forzar sin fix, permiso denegado, posición antigua, dato manual inválido y ausencia completa de ubicación. | Admite SOS sin posición, rechaza rangos inválidos, rotula manual/reciente y no dibuja posición ficticia; antigüedad aumenta y reloj incierto se indica. | Pendiente |
-| R26-PR-07 | Probar serializer/fragmentos V1: pérdida, duplicación, desorden, corrupción, exceso, timeout, mezcla de versiones y separación legacy. | Roundtrip íntegro solo con carga completa/válida; memoria acotada, liberación al vencer y chat legado intacto; TTL no se descuenta por fragmento. | 62 JVM nuevos aprobados el 18/10/2026; canal GATT sin activar y compatibilidad física pendiente |
+| R26-PR-07 | Probar serializer/fragmentos V1 y adaptador: pérdida, duplicación, desorden, corrupción, exceso, timeout, mezcla de versiones, callbacks y separación legacy. | Roundtrip íntegro solo con carga completa/válida; memoria acotada, liberación al vencer y chat legado intacto; TTL por salto y ningún éxito final inventado. | 62 tests de transporte + 34 del adaptador aprobados el 18/10/2026; GATT experimental conectado a la UI, validación física pendiente |
 | R26-PR-08 | A-B-C-D físicos, D único gateway, A sin enlace directo con C/D. Demostrar aislamiento retirando B/C y verificar que no haya salida IP en A/B/C. | Recorrido de IDs/saltos registrado; 10/10 SOS de prueba en cadena estable llegan en ≤120 s cada uno, objetivo provisional. Cadena rota no informa entrega falsa. | Pendiente; hipótesis de laboratorio |
 | R26-PR-09 | Quitar vecinos/salida, agotar TTL, llenar dedupe/cola y luego restaurar enlaces. Separar motor actual de custodia futura. | Motor actual no promete recuperación; se observan descartes y límites. Futuro sistema muestra sin salida y aplica política explícita, sin bucle ni TTL restaurado indefinidamente. | Lógica parcial histórica; sistema pendiente |
 | R26-PR-10 | Cortar Internet/DNS/API del gateway antes, durante y después del guardado; red Wi-Fi sin Internet; luego reconectar y probar otro gateway. | Sin confirmación central falsa, autenticación verificada y error/estado incierto claro. Reintento durable solo en E4; ID preservado. | Pendiente |
