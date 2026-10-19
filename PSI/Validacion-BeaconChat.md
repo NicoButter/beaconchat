@@ -1,9 +1,116 @@
 # 06 · Validación y criterios de aceptación
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 17/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 18/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
 
-## Validación técnica actual — Issue #1 · 17/10/2026
+## Transporte mesh binario V1 · implementación y validación JVM · 18/10/2026
+
+**Resultado: 110 tests JVM aprobados (48 anteriores + 62 nuevos), 0 fallos, 0 errores y 0 omitidos; APK debug compilada.** Se cumple el recorrido `MeshMessage → codec → fragmentador → reensamblador → codec → MeshEngine` con enlaces simulados. **Esto no prueba BLE físico: la validación A↔B continúa pendiente.** No se ejecutaron pruebas instrumentadas ni se utilizaron teléfonos.
+
+Trabajo sobre `NicoButter/beaconchat`, rama `main`, base `604d9898b6fa132a8b35ca81ef60752de4a0305b`, inicialmente sin cambios locales. Sin ramas, worktrees, commit ni push. `BLEMeshController`, `MeshScreen`, `DirectBleProtocol` y el núcleo existente permanecen intactos. No se agregan dependencias, permisos, pantallas, GPS, servidor ni gateway. Los informes inferiores se conservan como evidencia histórica de su fecha; sus menciones a un serializer futuro y al wrapper 9.7.1 describen el estado anterior.
+
+### Archivos y separación del canal
+
+- [MeshMessageCodec.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshMessageCodec.kt): serialización estricta del envelope lógico, independiente de Android.
+- [MeshFragmentProtocol.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshFragmentProtocol.kt): formato de tramas, fragmentador y contrato GATT reservado.
+- [MeshReassembler.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/transport/MeshReassembler.kt): cuotas, reensamblado, expiración y resultados explícitos, sin radio ni timers.
+- Tests nuevos: [codec](../app/src/test/java/com/nicobutter/beaconchat/mesh/transport/MeshMessageCodecTest.kt), [tramas](../app/src/test/java/com/nicobutter/beaconchat/mesh/transport/MeshFragmentProtocolTest.kt), [reensamblador](../app/src/test/java/com/nicobutter/beaconchat/mesh/transport/MeshReassemblerTest.kt) e [integración](../app/src/test/java/com/nicobutter/beaconchat/mesh/transport/MeshTransportIntegrationTest.kt).
+- [Wrapper](../gradle/wrapper/gradle-wrapper.properties): distribución corregida de 9.7.1 a **8.13**, compatible con la configuración existente de AGP 8.13.1. Documentación actualizada en este archivo y en [Arquitectura](Diseño-Arquitectura-BeaconChat.md).
+
+`MeshGattContract.CHARACTERISTIC_UUID` reserva **`7d2ea28a-f7bd-4f56-9e75-6e57c1e9b501`** para una característica mesh futura. Es diferente de los UUID actuales de publicidad, servicio y escritura directa. **No está registrada, anunciada ni conectada al controlador.** El adaptador futuro deberá descubrir explícitamente esta característica y dirigir su callback al reensamblador; no se habilita detección automática sobre el chat directo ni fallback por texto/callsign. El marcador binario `F9` tampoco puede iniciar un paquete legacy UTF-8 válido. Los tests verifican el rechazo en ambos sentidos, conservando los tests originales del chat.
+
+### Contrato binario del envelope
+
+Todos los enteros multibyte usan **big endian**. Los UUID ocupan 16 bytes (64 bits más significativos seguidos de 64 menos significativos); no se envían sus representaciones textuales.
+
+| Campo, en orden | Bytes | Regla V1 |
+| --- | ---: | --- |
+| Versión de MeshMessage | 1 | `01`; rechazar otras versiones |
+| Flags | 1 | `00` broadcast, `01` destino presente; rechazar otros bits |
+| `hopsRemaining` (TTL) | 1 | 0..16, perfil de transporte V1 consistente con el límite predeterminado del motor |
+| `originId` | 16 | UUID lógico preservado íntegramente |
+| `messageId` | 16 | UUID lógico preservado íntegramente |
+| `destinationId`, solo unicast | 16 | Ausente = `null`; un UUID de valor cero sigue siendo un destino explícito |
+| Longitud del contenido | 2 | 1..1024 **bytes** UTF-8, exactos y sin bytes sobrantes |
+| Contenido | L | UTF-8 estricto, no vacío/blanco; preservar espacios, saltos, NUL y composición Unicode |
+
+Tamaño total: **37 + L bytes broadcast / 53 + L unicast**; máximos **1061 / 1077 bytes**. No hay truncamiento ni sustitución de UTF-8/UTF-16 malformado. El codec rechaza longitudes, flags, versiones, TTL y contenido inválidos antes de producir un mensaje. Sus errores son `IllegalArgumentException`; el adaptador deberá manejarlos sin entregar al motor. Configuraciones del motor que amplíen TTL por encima de 16 o contenido por encima de 1024 no amplían este contrato V1.
+
+### Contrato de fragmentación
+
+Una trama ocupa **13..20 bytes**, compatible por tamaño con una carga ATT de 20 bytes sin negociar MTU. El formato define una posición canónica para cada byte; solo la última trama puede tener menos de 8 bytes útiles.
+
+| Offset | Campo | Bytes | Regla |
+| ---: | --- | ---: | --- |
+| 0 | Marcador | 1 | `F9` |
+| 1 | Versión de fragmentación | 1 | `01`, independiente de la versión del envelope |
+| 2 | ID de transferencia | 2 | 0..65535; ámbito de una sesión local de enlace |
+| 4 | Índice | 1 | Desde 0 hasta `cantidad - 1`, interpretado sin signo |
+| 5 | Cantidad | 1 | `ceil(longitudTotal / 8)`, máximo **135** |
+| 6 | Longitud total serializada | 2 | 1..1077, no la longitud del texto |
+| 8 | CRC32 del payload serializado completo | 4 | El mismo en todas las tramas, recalculado para cada envelope enviado |
+| 12 | Segmento del payload | 1..8 | 8 bytes salvo el último; longitud exacta obligatoria |
+
+Cabecera de **12 bytes**, hasta **8 bytes útiles** por trama. Unicast con `HOLA` ocupa 57 bytes y **8 tramas**; los máximos unicast/broadcast requieren **135 / 133 tramas**. No se requiere una trama inicial especial: se admite la última primero y orden arbitrario. El fragmentador acepta bytes acotados; la validación del envelope sigue siendo responsabilidad del codec antes de enviar y después de reconstruir.
+
+El ID de transferencia no reemplaza a `messageId`. El emisor futuro asignará IDs sin reutilizarlos dentro de la ventana de retención del receptor, incluso ante un reintento lógico. Un reenvío por otro salto puede usar otra transferencia y otro CRC, conservando los UUID, destino y texto originales. **Solo MeshEngine descuenta TTL al encolar cada salto lógico; codec, fragmentador y reensamblador no lo alteran.**
+
+**CRC32 detecta corrupción accidental del conjunto, con posibilidad de colisiones; no equivale a autenticación ni cifrado.** No autentica nodos, no protege contra modificaciones deliberadas ni constituye una defensa criptográfica de replay. No se verifica integridad individual inmediata de una trama: el CRC se verifica al completar el conjunto. El formato sigue enviando contenido legible. La protección criptográfica y la asociación autenticada de UUID a vecinos siguen pendientes.
+
+### Reensamblado, recursos y ciclo de vida
+
+La clave de reensamblado es `(MeshLinkSession, transferId)`. `MeshLinkSession` es un token UUID opaco de una encarnación de conexión local, generado por el host y renovado al reconectar; **no es un NodeId, MAC ni callsign**. El host futuro deberá proporcionar `previousHop` como identidad lógica separada; esta iteración no implementa su descubrimiento/provisión.
+
+| Límite predeterminado por instancia receptora | Valor / política |
+| --- | --- |
+| Transferencias activas globales | 8 |
+| Transferencias activas por sesión | 2 |
+| Entradas totales activas + registros de cierre (tombstones) | 32; no se expulsan entradas vigentes para admitir nuevas |
+| Payload reservado global | **8616 bytes**, sumando longitudes completas antes de asignar buffers |
+| Tamaño por transferencia | 1077 bytes máximo; configurable hacia abajo |
+| Fragmentos por transferencia | 135 máximo; configurable hacia abajo |
+| Expiración | **15.000 ms** desde el primer fragmento aceptado, reloj monotónico local |
+
+Cada transferencia activa reserva un `ByteArray` del tamaño total y un `BooleanArray` de hasta 135 posiciones. Además del payload, hay hasta 1080 posiciones de control de recepción y objetos/mapa acotados por las cuotas; 8616 no es una medida del heap JVM total. Entradas de más de 20 bytes se rechazan antes de asignar buffers de transferencia. El payload devuelto en `Complete` pasa al llamador y ya no cuenta como memoria retenida por el reensamblador. El host deberá acotar sus propias colas de entrada/salida.
+
+Resultados: `Pending`, `Duplicate` idéntico, `Complete(payload)` o `Rejected(reason)`. No se entrega carga parcial. Marcos malformados/versiones desconocidas se rechazan sin admisión ni destrucción de una transferencia válida. Metadatos incompatibles para una misma clave o un duplicado con otros bytes abortan la transferencia. CRC incorrecto al completar también aborta. El cierre libera el buffer y conserva solo un tombstone hasta la fecha límite original; los fragmentos posteriores reciben `CLOSED_TRANSFER`, sin reconstrucción ni nueva entrega. Un ID igual en otra sesión es independiente.
+
+Las cuotas llenas rechazan la transferencia nueva, sin expulsar una activa. Duplicados, llegada de más fragmentos, finalización y errores **no prolongan** el vencimiento. `cleanup()` descarta incompletos y tombstones expirados sin entrega; se invoca al operar y el host deberá llamarlo mientras esté inactivo. `discardSession()` libera todos los recursos de una conexión cerrada; su token no podrá reutilizarse. Después de expirar la retención, una repetición completa puede reconstruirse otra vez: la deduplicación lógica temporal sigue perteneciendo a MeshEngine.
+
+Clases síncronas, no thread safe: el host serializa llamadas y provee reloj monotónico, igual que para el motor. No hay workers, temporizadores, persistencia, ACK, retransmisión ni integración GATT activa. Solo un payload completo, con CRC correcto **y posteriormente decodificado/validado por el codec**, puede pasar a `MeshEngine.receive`.
+
+### Ejecuciones y cobertura
+
+Antes de cambiar código se revisaron las fuentes reales y se ejecutó la base con la instalación compatible Gradle 8.13 y Temurin **21.0.7+6**: **BUILD SUCCESSFUL in 42s**, 44 tareas ejecutadas, **48 tests aprobados** y APK debug. El sandbox impidió cargar la biblioteca nativa de Gradle; la ejecución necesitó acceso autorizado a la caché externa. El wrapper de este HEAD aún apuntaba a 9.7.1, por lo que se corrigió a 8.13 para las validaciones siguientes.
+
+Comando de validación de la implementación, usando el wrapper del proyecto:
+
+```bash
+JAVA_HOME=/home/lordcommander/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 \
+  ./gradlew testDebugUnitTest assembleDebug --console=plain
+```
+
+El intento dentro del sandbox se bloqueó al escribir `gradle-8.13-bin.zip.lck` en la caché de usuario; la validación se ejecutó con acceso autorizado. Primer intento con código nuevo: APK compilada y **109/110 tests aprobados**. La expectativa del test diamante confundía un despacho lógico con su fanout a dos vecinos; se corrigió para comprobar un solo handoff y una sola transferencia D→E. El motor no cambió. Reejecución final: **BUILD SUCCESSFUL in 2s**, 44 tareas (2 ejecutadas, 42 actualizadas); `testDebugUnitTest` volvió a ejecutar la suite y `assembleDebug` quedó actualizado respecto de la APK ya compilada con el código nuevo.
+
+| Suite nueva | Tests | Cobertura |
+| --- | ---: | --- |
+| `MeshMessageCodecTest` | 14 | Vectores binarios fijos; broadcast/unicast; UUID, destino y TTL; 1024 bytes ASCII/multibyte exactos; exceso; Unicode sin normalizar; UTF malformado; flags/versiones/longitudes; todos los prefijos truncados y bytes sobrantes |
+| `MeshFragmentProtocolTest` | 9 | Vectores fijos con CRC32 conocido; todas las longitudes 1..1077; 20 bytes máximos; índices sin signo y límites; tamaños/cantidades/versiones inválidas; separación inequívoca del legacy y UUID futuro |
+| `MeshReassemblerTest` | 29 | Máximo UTF-8 partido; orden inverso y 20 permutaciones reproducibles; duplicados idénticos/conflictivos; mezcla de contenido/metadatos; sesiones/transferencias simultáneas; cuotas de memoria y entradas; tombstones; expiración exacta; reconexión; reloj; corrupción; 10.000 entradas aleatorias/mutadas reproducibles |
+| `MeshTransportIntegrationTest` | 10 | Codec/tramas/reensamblado/motor en A↔B, cadena, anillo broadcast, diamante y cadena rota; TTL por salto; pérdida/corrupción sin handoff al motor; orígenes distintos con mismo messageId; sesión renovada; envelope inválido incluso con CRC válido |
+| Suites anteriores | 48 | 13 protocolo directo, 3 estados directos, 22 motor, 9 topologías anteriores y 1 ejemplo |
+| **Total final** | **110** | **0 fallos, 0 errores, 0 omitidos** |
+
+Evidencia local no versionada: [reporte JVM](../app/build/reports/tests/testDebugUnitTest/index.html), XML en `app/build/test-results/testDebugUnitTest/TEST-*.xml` y APK `app/build/outputs/apk/debug/app-debug.apk` (**11.957.910 bytes**, SHA-256 `d9015ed82d4bc578de30f4a29c8e5f8a51a4c8e949bbf869bf807c9bb5a44e0e`). Inicio del XML final de integración: **18/10/2026 21:48:25.598 UTC−03:00**, America/Argentina/Rio_Gallegos (`2026-10-19T00:48:25.598Z`). Se conservan advertencias previas de BuildConfig, source/target Java 8 y APIs obsoletas; no se ejecutó Lint. `git diff --check`: correcto. La comparación byte a byte con HEAD confirma intactos `BLEMeshController`, `MeshScreen`, `DirectBleProtocol`, `MeshEngine` y `MeshMessage`; los enlaces locales de ambos documentos actualizados existen.
+
+### Pendientes y próximos pasos
+
+1. Diseñar el adaptador BLE asíncrono con colas acotadas, backpressure, asignación/retención de IDs por conexión, limpieza al desconectar, descubrimiento del canal dedicado y provisión de identidades lógicas. Registrar/requerir la nueva característica solo en esa iteración, preservando peers legacy.
+2. Definir política de pérdidas/reintentos/ACK si se necesita fiabilidad: hoy una transferencia incompleta vence y no hay recuperación automática. `Handoff.ACCEPTED` continúa siendo aceptación local, sin promesa de recepción remota.
+3. Ejecutar el procedimiento físico A↔B inferior para el chat actual. Después de integrar el adaptador, probar tramas y fallos reales, compatibilidad legacy y cadena A→B→C. Compilación y JVM no sustituyen esas pruebas.
+4. Resolver autenticación, cifrado y provisión/revocación de claves antes de atribuir garantías de seguridad. No se implementaron servicios de emergencia, ubicación ni backend.
+
+## Validación técnica histórica — Issue #1 · 17/10/2026
 
 **Resultado: tests JVM y APK debug aprobados con Gradle 8.13 / JDK 21; comunicación física A↔B pendiente. No corresponde declarar cerrado el criterio de aceptación de radio.** `adb devices -l` devolvió una lista vacía. No se instalaron APK en teléfonos ni se ejecutaron pruebas físicas o instrumentadas.
 
@@ -119,6 +226,7 @@ Ficha a completar por intento: `caso/subcaso | fecha y hora | A/B modelo/API | A
 | --- | --- | --- |
 | [Informe BLE directo](Validacion-BeaconChat.md) | **17 tests JVM reportados**: 13 protocolo, 3 estados y 1 original. Prueba A↔B pendiente; sin dispositivos en aquel informe | Stack Bluetooth, alcance, compatibilidad entre fabricantes ni mesh físico |
 | [Informe del núcleo](Validacion-BeaconChat.md) | **48 tests totales reportados**, incluidos 31 del núcleo (22 motor + 9 topologías) y los 17 anteriores | GNSS, radio real, fragmentación, DTN, gateway, backend ni rescate |
+| Transporte binario V1 (sección actual superior) | **110 tests totales aprobados el 18/10/2026**: 48 anteriores + 62 nuevos; fragmentación/reensamblado e integración lógica con MeshEngine | Adaptador GATT activo, radio física, fiabilidad/ACK, autenticación ni cifrado |
 | [Código de tests del motor](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshEngineTest.kt) y [topologías](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshTopologyTest.kt) | Cadena, ruptura de enlace, triángulo, anillo, caminos duplicados, límites, TTL y expiración mediante red simulada | Probabilidades de pérdida, obstáculos, consumo y restricciones de un teléfono |
 | Señalización óptica/vibración/audio/QR/beacon BLE | Componentes presentes en código | Tasas de decodificación o funcionamiento garantizado bajo derrumbes |
 | Revisión documental previa | Referencia histórica a `INFORME-REVISION.md` (archivo no presente en este checkout) | No acredita una ejecución de los ensayos anteriores |
@@ -137,7 +245,7 @@ Los IDs completos son `R26-PR-01` a `R26-PR-19`. PR-19 corresponde a la revisió
 | R26-PR-04 | Con implementación futura, registrar SOS sintéticos válidos/invalidables y doble toque/reintento. | Esquema validado, ID/carga estable para reintentos, sin incidente accidental doble; nota/límites UTF-8 comprobados. | Pendiente |
 | R26-PR-05 | Desactivar datos/Wi-Fi; ensayar GNSS al aire libre y en interior, con permisos, proveedor apagado y límite de espera configurado. Registrar tiempo hasta fix y precisión reportada. | No exige Internet, captura/edad/fuente visibles; timeout no fabrica posición ni bloquea SOS. No exigir fix en toda condición. | Pendiente físico |
 | R26-PR-06 | Forzar sin fix, permiso denegado, posición antigua, dato manual inválido y ausencia completa de ubicación. | Admite SOS sin posición, rechaza rangos inválidos, rotula manual/reciente y no dibuja posición ficticia; antigüedad aumenta y reloj incierto se indica. | Pendiente |
-| R26-PR-07 | Probar serializer/fragmentos futuros: pérdida, duplicación, desorden, corrupción, exceso, timeout, mezcla de versiones y peer legado. | Roundtrip íntegro solo con carga completa/válida; memoria acotada, liberación al vencer y chat legado intacto; TTL no se descuenta por fragmento. | Pendiente |
+| R26-PR-07 | Probar serializer/fragmentos V1: pérdida, duplicación, desorden, corrupción, exceso, timeout, mezcla de versiones y separación legacy. | Roundtrip íntegro solo con carga completa/válida; memoria acotada, liberación al vencer y chat legado intacto; TTL no se descuenta por fragmento. | 62 JVM nuevos aprobados el 18/10/2026; canal GATT sin activar y compatibilidad física pendiente |
 | R26-PR-08 | A-B-C-D físicos, D único gateway, A sin enlace directo con C/D. Demostrar aislamiento retirando B/C y verificar que no haya salida IP en A/B/C. | Recorrido de IDs/saltos registrado; 10/10 SOS de prueba en cadena estable llegan en ≤120 s cada uno, objetivo provisional. Cadena rota no informa entrega falsa. | Pendiente; hipótesis de laboratorio |
 | R26-PR-09 | Quitar vecinos/salida, agotar TTL, llenar dedupe/cola y luego restaurar enlaces. Separar motor actual de custodia futura. | Motor actual no promete recuperación; se observan descartes y límites. Futuro sistema muestra sin salida y aplica política explícita, sin bucle ni TTL restaurado indefinidamente. | Lógica parcial histórica; sistema pendiente |
 | R26-PR-10 | Cortar Internet/DNS/API del gateway antes, durante y después del guardado; red Wi-Fi sin Internet; luego reconectar y probar otro gateway. | Sin confirmación central falsa, autenticación verificada y error/estado incierto claro. Reintento durable solo en E4; ID preservado. | Pendiente |
