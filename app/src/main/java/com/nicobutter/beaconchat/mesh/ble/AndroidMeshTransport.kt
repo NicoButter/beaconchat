@@ -14,6 +14,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
+import com.nicobutter.beaconchat.sos.SosIncident
+import com.nicobutter.beaconchat.sos.SosMeshGateway
 
 /** Android I/O only. Node/client policy is shared with JVM tests; all Bluetooth state is on main. */
 @Suppress("DEPRECATION", "MissingPermission")
@@ -68,6 +70,7 @@ class AndroidMeshTransport(context: Context) {
     fun setDirectBusy(value: Boolean) { directBusy = value; node?.setDirectBusy(value) }
     fun discovered(address: String) { node?.discovered(address) }
     fun originate(destination: NodeId?, content: String, ttl: Int) = node?.originate(destination, content, ttl) == true
+    fun submitSosLaboratory(incident: SosIncident) = SosMeshGateway { content -> originate(null, content, 3) }.submit(incident)
 
     private fun serverSession(address: String): MeshLinkSession? {
         if (!_state.value.enabled) return null

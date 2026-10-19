@@ -3,7 +3,102 @@
 **Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 18/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
 
-## Integración Android mesh experimental · 18/10/2026
+## Implementación #5 · SOS offline y laboratorio GNSS · 18/10/2026
+
+**Resultado: 183 tests JVM aprobados (144 de la base + 39 nuevos), 0 fallos, 0 errores, 0 omitidos y APK debug compilada con Gradle 8.13/JDK 21.** Se construye, serializa, fragmenta, reensambla e interpreta un SOS válido sintético o sin posición, incluido A→B→C con el adaptador y GATT falso. **No se obtuvieron coordenadas satelitales ni se probó BLE físico.** ADB devolvió una lista vacía al iniciar y terminar.
+
+### Base, alcance y archivos
+
+Checkout `NicoButter/beaconchat`, `main`, HEAD **`4a1662d6d6f6adf322ef9681741e285b2f731df6`**, inicialmente limpio. `git rev-list --left-right --count HEAD...origin/main` devolvió `0 0`; `git ls-remote origin refs/heads/main` confirmó el mismo SHA remoto (consulta de lectura, sin fetch/reset). Se preservó todo el trabajo de la base. No se crean ramas, worktrees, commits ni push. Los informes inferiores son históricos y sus límites describen cada iteración de entonces.
+
+| Archivos nuevos / modificados | Resultado |
+| --- | --- |
+| [SosIncident.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/SosIncident.kt) | Modelo inmutable, enums con IDs de wire explícitos, ubicación opcional y validación estricta |
+| [SosCodec.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/SosCodec.kt) | Registro SOS binario V1 en contenido ASCII base64url; sin modificar protocolo mesh |
+| [SosMeshPolicy.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/SosMeshPolicy.kt) | Factory de ensayo separada, barrera de privacidad y gateway de aplicación; no es gateway de red/HTTPS |
+| [GnssAcquisition.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/GnssAcquisition.kt) | Política pura de solicitud única, tokens, deadline, precisión, edad, actual/conocida/antigua/ausente |
+| [AndroidGnssLocationSource.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/AndroidGnssLocationSource.kt) | LocationManager/GPS_PROVIDER asíncrono con cancelación/lifecycle y timeout configurable |
+| [SosLaboratoryDialog.kt](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/SosLaboratoryDialog.kt), [MeshScreen.kt](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/MeshScreen.kt) | Laboratorio local independiente de disponibilidad BLE; recepción interpretada y estados sin confirmar |
+| [MeshBleNode.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/MeshBleNode.kt), [AndroidMeshTransport.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/AndroidMeshTransport.kt) | Política SOS aplicada en origen y antes de entrega/relay; envío tipado del ensayo por el transporte actual |
+| [AndroidManifest.xml](../app/src/main/AndroidManifest.xml) | FINE/COARSE sin maxSdk 30 para GPS también en Android reciente; sin INTERNET ni BACKGROUND_LOCATION |
+| [SosModelCodecTest.kt](../app/src/test/java/com/nicobutter/beaconchat/sos/SosModelCodecTest.kt), [GnssAcquisitionTest.kt](../app/src/test/java/com/nicobutter/beaconchat/sos/GnssAcquisitionTest.kt), [SosMeshIntegrationTest.kt](../app/src/test/java/com/nicobutter/beaconchat/sos/SosMeshIntegrationTest.kt) | 39 tests nuevos; el helper GATT de MeshBleAdapterTest pasa de private a internal para reutilizar exactamente la misma simulación |
+| [README español/inglés](../README.md), [Requerimientos](ERS-BeaconChat.md), [Arquitectura](Diseño-Arquitectura-BeaconChat.md), [Roadmap](Roadmap-BeaconChat.md), [Trazabilidad](Trazabilidad-BeaconChat.md), este informe | Estado actualizado sin duplicar documentos ni alterar logos/identidad de Vetrabyte |
+
+MeshEngine, MeshMessage, MeshMessageCodec, MeshFragmentProtocol, MeshReassembler, MeshGattClient, MeshLinkProtocol, DirectBleProtocol y beacon SOS conservan su implementación. No se agregan dependencias, backend, gateway HTTPS, mapas, cuentas ni LoRa. El componente llamado SosMeshGateway es una frontera local de aplicación, no un servicio externo.
+
+### Contrato SOS V1 y presupuesto
+
+`SosIncident`: UUID no nulo estable, versión 1, tipo (`MEDICAL=1`, `FIRE=2`, `TRAPPED=3`, `OTHER=4`), gravedad **declarada** (`LOW=1`, `MODERATE=2`, `HIGH=3`, `CRITICAL=4`), creación epoch ms no negativa, nota opcional no blanca de hasta **256 bytes UTF-8** y posición opcional. No clasifica clínicamente ni asigna prioridad automática. Tiempo civil/identidad son declarados, sin autenticación ni sincronización entre equipos.
+
+Posición: latitud/longitud double finitos en ±90/±180, precisión estimada opcional finita ≥0 metros, fuente GNSS/sintética/mock GPS, edad monotónica no negativa y validez coherente. `CURRENT` exige ≤30.000 ms; `LAST_KNOWN` ≤300.000 ms; `STALE` >300.000 ms. Un fix cacheado no se presenta como nuevo aunque tenga edad cero. Ausencia es **null**, nunca coordenadas de reemplazo; `(0,0)` sigue siendo una coordenada explícita válida.
+
+Formato de contenido: prefijo ASCII **`BCSOS:`**, seguido de base64url canónico sin padding de un registro **big endian**:
+
+| Campo, en orden | Bytes / regla |
+| --- | --- |
+| Versión | 1, solo 01 |
+| Flags | 1; bit 0 posición, bit 1 precisión presente (requiere posición), bit 2 laboratorio; rechazar otros bits |
+| UUID de incidente | 16, dos longs en orden MSB/LSB |
+| Creación epoch ms | 8, no negativa |
+| Tipo / gravedad | 1 + 1, IDs explícitos anteriores, nunca ordinal de enum |
+| Si hay posición: fuente / validez | 1 + 1; GNSS=1, sintética=2, mock=3; CURRENT=1, LAST_KNOWN=2, STALE=3 |
+| Latitud / longitud / edad | 8 + 8 + 8; doubles y long |
+| Precisión, si su flag está presente | 8, double |
+| Longitud de nota | 2, sin signo, 0 = ausente; exacta y ≤256 |
+| Nota | UTF-8 estricto, sin sustituciones, truncado ni normalización |
+
+Registro sin posición **30 + N bytes**; con posición **56 + N**, o **64 + N** si incluye precisión. Máximo **320 bytes binarios → 433 bytes ASCII** con prefijo, dentro de 1024 de MeshMessage. El máximo unicast queda en 486 bytes de envelope y **61 tramas ≤20 bytes**. Se rechazan versiones/enums/flags desconocidos, longitudes falsas, sobrantes, truncados, base64 no canónico, UTF-8 inválido, coordenadas/precisión no finitas y edades/validez inconsistentes. Base64 **no cifra**. La implementación no depende de java.util.Base64 (API 26): su codificación acotada es compatible con minSdk 24 y se contrasta en JVM con el encoder JDK.
+
+El UUID y contenido SOS quedan fijos durante un reenvío o reintento del mismo objeto. **Cada reintento manual crea otro messageId mesh**, para no reutilizar la clave de un intento ya deduplicado, conservando el incidente dentro del contenido. No hay reintento automático, custodia persistente ni deduplicación durable de incidentes; un receptor puede observar dos intentos del mismo SOS. Para cambiar sus datos, la UI prepara otro incidente con nuevo UUID.
+
+### GNSS offline, permisos y ciclo de vida
+
+Solo `LocationManager.GPS_PROVIDER`: lectura de última posición de ese proveedor y `requestLocationUpdates`, sin proveedor NETWORK/fused, Wi-Fi/datos, geocoder o mapas. Callbacks y mantenimiento llegan al main looper; no se espera sincrónicamente un fix. Una solicitud activa y un candidato en memoria; token/deadline rechazan callbacks viejos o posteriores al vencimiento. Timeout **1..120 s**, predeterminado **30 s**. GPS apagado/ausente, timeout, denegación, acceso solo aproximado y revocación degradan explícitamente a conocido/ausente/error y permiten crear SOS sin ubicación.
+
+FINE/COARSE se declaran sin límite API 30. La UI los solicita juntos al pulsar GPS; requiere FINE para iniciar GPS_PROVIDER. Android 12+ puede conceder solo aproximada: no se usa como fix preciso ni se solicita fondo. Se contrastó el manejo con [permisos en tiempo de ejecución](https://developer.android.com/develop/sensors-and-location/location/permissions/runtime) y la edad/precisión con [Location](https://developer.android.com/reference/android/location/Location). La precisión es estimada; GPS_PROVIDER o una bandera no prueban por sí solos recepción satelital. Mocks Android se conservan como `MOCK_GPS`, nunca se convierten automáticamente en datos sintéticos autorizados.
+
+La edad se calcula con elapsed realtime del mismo teléfono, se actualiza en la vista y se vuelve a evaluar al crear SOS. El cuerpo guarda la instantánea de edad/calidad **al crear**, rotulada así en UI; no se transforma una ubicación antigua en actual durante un retry. Al pausar/salir/cerrar se quitan listeners y watchdog, se cancelan solicitudes, se descarta el fix y el SOS local. Solo se usan estados Compose no guardados; no se persisten coordenadas/nota SOS ni se añaden al historial mesh. La nota editable queda solo en la memoria del diálogo y el ensayo usa una nota fija separada.
+
+### Privacidad, integración y veracidad de estado
+
+El laboratorio crea por separado datos de ensayo: otro UUID, nota fija y **posición constante ficticia `12.3456,-45.6789`, precisión 25 m, edad 0**, o null. La UI no copia GNSS ni nota del SOS local. El envío tipado exige laboratorio y posición ausente o exactamente esa fixture. `MeshBleNode` vuelve a aplicar la política tanto antes de originar como después de reensamblar/validar el envelope y **antes de MeshEngine.receive**: un SOS con GNSS/mock real, una posición arbitraria etiquetada sintética, o `BCSOS:` malformado no se entrega, registra con contenido ni retransmite.
+
+Mensajes normales conservan su ruta y chat legado intactos; `BCSOS:` es el espacio reservado del nuevo contenido estructurado, no un cambio del protocolo binario mesh. Esta barrera es de aplicación: **no autentica declaraciones remotas ni detecta coordenadas escondidas en texto arbitrario**. No es anonimización/cifrado; la protección de coordenadas reales necesita un diseño criptográfico antes de levantar el bloqueo. Un peer antiguo desconoce esta política; no se le envían datos reales como prueba.
+
+UI en Mesh Radar → “Laboratorio SOS offline”: tipo/gravedad, nota local, captura GPS, creación local con/sin posición y preparación separada de ensayo sintético/sin posición. Enviar/reintentar solo está habilitado con participación mesh y conserva el UUID del ensayo. `ORIGINATED_LOCALLY` significa generación del intento, **no admisión en cola**: la UI muestra admisión solo al observar QUEUED, enlace solo ante LINK_WRITTEN, recepción local tras interpretar el SOS, y siempre **destino final sin confirmar**. No hay servidor ni ACK final ni servicio operativo de rescate.
+
+### Ejecución, resultados y límites de evidencia
+
+Antes de cambios: `./gradlew testDebugUnitTest --rerun assembleDebug --console=plain`, JDK 21.0.7+6, **144 aprobados**, `BUILD SUCCESSFUL in 1s` (test reejecutado). El sandbox bloqueó inicialmente el lock de caché Gradle; se ejecutó con acceso autorizado, sin cambiar wrapper/dependencias. También se autorizó la consulta de lectura del remoto tras fallo DNS dentro del sandbox.
+
+Validación final:
+
+```bash
+JAVA_HOME=/home/lordcommander/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 \
+  ./gradlew testDebugUnitTest assembleDebug --console=plain
+git diff --check
+```
+
+**BUILD SUCCESSFUL in 3s**, 44 tareas (7 ejecutadas, 37 actualizadas); suite ejecutada y APK recompilada. Primer intento de la suite nueva: APK compilada y error de compilación en un test por smart cast de propiedad nullable de otro módulo; se fijó una referencia local y las 183 pruebas pasaron. Tras aclarar la edad al crear en UI se repitió la validación final, nuevamente aprobada. Se conservan warnings de BuildConfig, source/target Java 8 y APIs obsoletas. No se ejecutó Lint ni instrumentación.
+
+| Suite nueva | Tests | Cobertura |
+| --- | ---: | --- |
+| SosModelCodecTest | 16 | Vector binario fijo, ausencia/ceros explícitos, UUID/tiempo/enums, coordenadas/precisión, umbrales de edad, UTF-8 ≤256 bytes y exceso, máximo 433 bytes, base64 canónico, longitudes, todos los prefijos truncados y 3000 entradas mutadas/aleatorias |
+| GnssAcquisitionTest | 14 | Solicitud única/token, precisión/edad/fuente, cache nunca actual, fix envejecido, GPS apagado, permiso insuficiente/revocado, timeout exacto, cancelación, callbacks tardíos/futuros, mock y límites de configuración; **sin Android/GPS real** |
+| SosMeshIntegrationTest | 9 | SOS → codec → MeshMessage → fragmentos/reensamblado → interpretación; GATT falso A→B→C sin A↔C, UUID/cuerpo estable en retries, bloqueo de GNSS en gateway/origen/relay sin logs con contenido, ausencia de posición, chat normal/legacy y ningún éxito final inventado |
+| Regresión anterior | 144 | Motor, transporte, adaptador BLE y protocolos directos |
+| **Total** | **183** | **0 fallos, 0 errores, 0 omitidos** |
+
+Evidencia local no versionada: `app/build/reports/tests/testDebugUnitTest/index.html`, XML `app/build/test-results/testDebugUnitTest/TEST-*.xml`, APK `app/build/outputs/apk/debug/app-debug.apk` (**12.222.833 bytes**, SHA-256 `08c4b3ea4a89b69c792cb4299d51793cc5ca5a42481132f3ebce9890c453ca92`). Suite final SOS de integración: **18/10/2026 23:43:51.904 UTC−03:00** (`2026-10-19T02:43:51.904Z`). `git diff --check` correcto. **AndroidGnssLocationSource/LocationManager/Compose se verificaron por compilación; no por ejecución en teléfono.**
+
+### Pruebas físicas pendientes y próximos pasos
+
+1. En un Android API 24–30 y otro API 31+, instalar la misma APK por serial explícito y documentar modelo/API/APK/HEAD, permisos y radios. Modo avión, Wi-Fi/datos apagados, GPS habilitado. Abrir el laboratorio y solicitar GPS al aire libre/interior: registrar tiempo, fuente, precisión, edad, timeout y disponibilidad real. No acreditar satélites solo por tener coordenadas; conservar evidencia del proveedor/estado GNSS y marcar mocks. No publicar capturas con ubicación/nota reales.
+2. Ensayar denegación, “solo aproximada” Android 12+, revocación, GPS apagado, ausencia de fix/última posición, timeout 1/30/120 s, cancelación/Home/cierre y regreso. Confirmar listeners detenidos, sin ubicación de fondo, antiguo rotulado y SOS sin posición válido. Usar datos no sensibles o sintéticos para capturas compartidas.
+3. Para tránsito, usar **exclusivamente** “Preparar SOS sintético” o “Preparar ensayo sin posición”. Activar mesh, aplicar el procedimiento A↔B/A→B→C inferior con extremos aislados y verificar el mismo UUID SOS/cuerpo en receptor e intentos. Confirmar que cola/enlace nunca anuncien destino final. Con un emisor de pruebas, inyectar SOS GNSS sintéticos marcados fuente GNSS para verificar rechazo; nunca inyectar coordenadas privadas reales.
+4. Validar permisos/lifecycle/UI y radio en hardware; medir adquisición, energía y latencia. Mantener bloqueo hasta resolver autenticación/cifrado, consentimiento y retención. Backend, gateway, mapas, cuentas, LoRa, custodia y confirmación final siguen fuera de esta iteración.
+
+## Histórico: integración Android mesh experimental · 18/10/2026
 
 **Resultado actual: recorrido Android/GATT implementado y APK debug compilada; 144 tests JVM aprobados (110 anteriores + 34 nuevos), 0 fallos, 0 errores y 0 omitidos. BLE físico A↔B y A→B→C no ejecutado.** `adb devices -l` devolvió una lista vacía al iniciar y al finalizar la validación. Las topologías automatizadas sustituyen el I/O Bluetooth por un GATT falso; no constituyen resultados de radio.
 
@@ -328,8 +423,9 @@ Ficha a completar por intento: `caso/subcaso | fecha y hora | A/B modelo/API | A
 | --- | --- | --- |
 | [Informe BLE directo](Validacion-BeaconChat.md) | **17 tests JVM reportados**: 13 protocolo, 3 estados y 1 original. Prueba A↔B pendiente; sin dispositivos en aquel informe | Stack Bluetooth, alcance, compatibilidad entre fabricantes ni mesh físico |
 | [Informe del núcleo](Validacion-BeaconChat.md) | **48 tests totales reportados**, incluidos 31 del núcleo (22 motor + 9 topologías) y los 17 anteriores | GNSS, radio real, fragmentación, DTN, gateway, backend ni rescate |
-| Transporte binario V1 (sección actual superior) | **110 tests totales aprobados el 18/10/2026**: 48 anteriores + 62 nuevos; fragmentación/reensamblado e integración lógica con MeshEngine | Adaptador GATT activo, radio física, fiabilidad/ACK, autenticación ni cifrado |
-| Integración Android mesh experimental (primera sección) | **144 tests totales aprobados el 18/10/2026**: 110 anteriores + 34 nuevos; adaptador Android compilado y política probada con GATT falso | Ejecución real de BluetoothGatt/Handler, permisos, radio A↔B/A→B→C, entrega final, autenticación ni cifrado |
+| Histórico: transporte binario V1 | **110 tests totales aprobados el 18/10/2026**: 48 anteriores + 62 nuevos; fragmentación/reensamblado e integración lógica con MeshEngine | Adaptador GATT activo, radio física, fiabilidad/ACK, autenticación ni cifrado |
+| Histórico: integración Android mesh | **144 tests totales aprobados el 18/10/2026**: 110 anteriores + 34 nuevos; adaptador Android compilado y política probada con GATT falso | Ejecución real de BluetoothGatt/Handler, permisos, radio A↔B/A→B→C, entrega final, autenticación ni cifrado |
+| Implementación #5, sección inicial | **183 aprobados**: base de 144 reejecutada + 39 SOS/GNSS/privacidad/integración; APK debug compilada | Obtención satelital, permisos/lifecycle Android físico, radio real, seguridad criptográfica ni rescate |
 | [Código de tests del motor](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshEngineTest.kt) y [topologías](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshTopologyTest.kt) | Cadena, ruptura de enlace, triángulo, anillo, caminos duplicados, límites, TTL y expiración mediante red simulada | Probabilidades de pérdida, obstáculos, consumo y restricciones de un teléfono |
 | Señalización óptica/vibración/audio/QR/beacon BLE | Componentes presentes en código | Tasas de decodificación o funcionamiento garantizado bajo derrumbes |
 | Revisión documental previa | Referencia histórica a `INFORME-REVISION.md` (archivo no presente en este checkout) | No acredita una ejecución de los ensayos anteriores |
@@ -345,9 +441,9 @@ Los IDs completos son `R26-PR-01` a `R26-PR-19`. PR-19 corresponde a la revisió
 | R26-PR-01 | Ejecutar tests de protocolo/estado y protocolo manual A↔B del informe BLE: permisos, Unicode, 20 bytes exactos/exceso, desconexión, pausa y timeout. | Tests del protocolo correctos; ambos teléfonos registran texto íntegro, sin truncar ni éxito falso; guardar modelos/SO/logs. | 13 protocolo + 3 estados JVM aprobados el 17/10/2026; físico pendiente |
 | R26-PR-02 | Revisar y reproducir suite del núcleo: cadena intacta/rota, TTL cero, triángulo/anillo/diamante, dedupe/colas/reloj y fallos de transporte. | Resultado lógico esperado y propagación termina; transporte no disponible consume intento sin reencolar ni ACK. | 31 JVM aprobados el 17/10/2026; simulación sin radio |
 | R26-PR-03 | En dispositivos compatibles, probar cada emisor/receptor óptico, vibración, audio, QR y beacon; registrar luz/ruido/acoplamiento, permisos y detención. | Emisión/decodificación observada por canal y condición; errores y limitaciones explícitos, sin atribuir alcance genérico ni geolocalización al beacon. | Pendiente físico |
-| R26-PR-04 | Con implementación futura, registrar SOS sintéticos válidos/invalidables y doble toque/reintento. | Esquema validado, ID/carga estable para reintentos, sin incidente accidental doble; nota/límites UTF-8 comprobados. | Pendiente |
-| R26-PR-05 | Desactivar datos/Wi-Fi; ensayar GNSS al aire libre y en interior, con permisos, proveedor apagado y límite de espera configurado. Registrar tiempo hasta fix y precisión reportada. | No exige Internet, captura/edad/fuente visibles; timeout no fabrica posición ni bloquea SOS. No exigir fix en toda condición. | Pendiente físico |
-| R26-PR-06 | Forzar sin fix, permiso denegado, posición antigua, dato manual inválido y ausencia completa de ubicación. | Admite SOS sin posición, rechaza rangos inválidos, rotula manual/reciente y no dibuja posición ficticia; antigüedad aumenta y reloj incierto se indica. | Pendiente |
+| R26-PR-04 | Crear y serializar SOS sintéticos/sin posición válidos e inválidos; transportar/reintentar en el adaptador falso. | UUID/cuerpo del incidente estable, intentos mesh diferenciados, UTF-8/nota/posición validados; no afirmar dedupe central. | 16 modelo/codec + 9 integración JVM aprobados; UI física pendiente |
+| R26-PR-05 | Desactivar datos/Wi-Fi; ensayar GNSS al aire libre/interior, permisos, proveedor apagado, timeout y cancelación. | No exige Internet; edad/fuente/precisión visibles; no inventa posición ni exige fix en toda condición. | 14 tests de política aprobados y componente Android compilado; GPS físico pendiente |
+| R26-PR-06 | Forzar sin fix, permiso denegado/aproximado/revocado, cache antiguo y ausencia. Referencia manual futura separada. | SOS sin posición válido; rangos/edad/calidad estrictos, cache nunca actual, sin coordenadas de reemplazo. | Modelo/política JVM aprobados; Android físico y entrada manual pendientes |
 | R26-PR-07 | Probar serializer/fragmentos V1 y adaptador: pérdida, duplicación, desorden, corrupción, exceso, timeout, mezcla de versiones, callbacks y separación legacy. | Roundtrip íntegro solo con carga completa/válida; memoria acotada, liberación al vencer y chat legado intacto; TTL por salto y ningún éxito final inventado. | 62 tests de transporte + 34 del adaptador aprobados el 18/10/2026; GATT experimental conectado a la UI, validación física pendiente |
 | R26-PR-08 | A-B-C-D físicos, D único gateway, A sin enlace directo con C/D. Demostrar aislamiento retirando B/C y verificar que no haya salida IP en A/B/C. | Recorrido de IDs/saltos registrado; 10/10 SOS de prueba en cadena estable llegan en ≤120 s cada uno, objetivo provisional. Cadena rota no informa entrega falsa. | Pendiente; hipótesis de laboratorio |
 | R26-PR-09 | Quitar vecinos/salida, agotar TTL, llenar dedupe/cola y luego restaurar enlaces. Separar motor actual de custodia futura. | Motor actual no promete recuperación; se observan descartes y límites. Futuro sistema muestra sin salida y aplica política explícita, sin bucle ni TTL restaurado indefinidamente. | Lógica parcial histórica; sistema pendiente |

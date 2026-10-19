@@ -4,6 +4,7 @@ import com.nicobutter.beaconchat.mesh.core.*
 import com.nicobutter.beaconchat.mesh.transport.*
 import java.util.ArrayDeque
 import java.util.UUID
+import com.nicobutter.beaconchat.sos.SosMeshPolicy
 
 enum class MeshActivityKind { ORIGINATED, LOCAL_RECEIVED, QUEUED, LINK_WRITTEN, FAILURE, INFO }
 data class MeshActivity(val kind: MeshActivityKind, val detail: String, val message: MeshMessage? = null)
@@ -63,6 +64,10 @@ class MeshBleNode(val nodeId: NodeId, private val clock: MeshClock, port: MeshGa
 
     fun originate(destination: NodeId?, content: String, ttl: Int = 3, messageId: MessageId = MessageId(UUID.randomUUID())): Boolean {
         if (!enabled) { event(MeshActivityKind.FAILURE, "Mesh desactivado"); publish(); return false }
+        if (!SosMeshPolicy.contentPermitted(content)) {
+            event(MeshActivityKind.FAILURE, "SOS bloqueado: solo ensayos sintéticos o sin posición; no se transmite GNSS real")
+            publish(); return false
+        }
         val candidate = MeshMessage(messageId, nodeId, destination, content, ttl)
         try { MeshMessageCodec.encode(candidate) } catch (e: IllegalArgumentException) {
             event(MeshActivityKind.FAILURE, e.message ?: "Mensaje inválido"); publish(); return false
@@ -119,6 +124,10 @@ class MeshBleNode(val nodeId: NodeId, private val clock: MeshClock, port: MeshGa
         if (result is ReassemblyResult.Complete) {
             val message = try { MeshMessageCodec.decode(result.payload) } catch (e: IllegalArgumentException) {
                 event(MeshActivityKind.FAILURE, "Envelope rechazado: ${e.message}")
+                publish(); return false
+            }
+            if (!SosMeshPolicy.contentPermitted(message.content)) {
+                event(MeshActivityKind.FAILURE, "SOS entrante bloqueado por privacidad/formato; no se entrega ni retransmite")
                 publish(); return false
             }
             val decision = engine.receive(message, previousHop)

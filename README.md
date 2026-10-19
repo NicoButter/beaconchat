@@ -28,8 +28,11 @@ Los canales tienen limitaciones diferentes: BLE exige alcance radioeléctrico y 
 | --- | --- | --- |
 | Comunicación BLE directa | Descubre pares y envía texto breve por advertising/scanning + GATT | Implementada; **prueba física A↔B pendiente** |
 | Protocolo BLE directo | Valida paquetes `CALLSIGN:MENSAJE` UTF-8 de **hasta 20 bytes en total** | Tests unitarios reportados; sin fragmentación |
-| Núcleo mesh lógico | IDs de nodo/mensaje independientes, TTL, deduplicación temporal, cola FIFO y transporte simulado | **31 tests JVM nuevos reportados**; **no integrado al BLE** |
-| Retransmisión multisalto A→B→C | Reenvío entre teléfonos fuera de alcance directo | **No implementado en dispositivos** |
+| Núcleo y transporte mesh Android | IDs lógicos, TTL, deduplicación, codec V1, fragmentos ≤20 bytes, reensamblado y GATT dedicado | Implementados e integrados; política probada con GATT falso; **radio física pendiente** |
+| Retransmisión multisalto A→B→C | Cola acotada y reenvío por vecinos con identidad declarada por sesión | Ruta Android implementada; cadena/diamante/anillo simulados; **no validado entre teléfonos** |
+| SOS estructurado offline | UUID estable, tipo/gravedad declarada, creación, nota y ubicación opcional; codec de hasta 433 bytes | Implementado; **39 tests JVM nuevos** de SOS/GNSS/privacidad/integración |
+| GPS/GNSS local | `LocationManager.GPS_PROVIDER`, permiso preciso, timeout y cancelación; distingue fix reciente, conocido y ausencia | Componente Android implementado; **captura satelital real no verificada** |
+| Laboratorio SOS mesh | Ensayos con posición sintética fija o sin posición; interpretación del SOS al recibir | Integrado en Mesh Radar; **SOS con coordenadas GNSS reales bloqueados** en origen y relay |
 | Beacon BLE de emergencia | Emisión/detección de señales de emergencia mediante anuncios BLE | Implementado en código; alcance/fiabilidad sin certificación |
 | Luz / Morse | Codificación con linterna y detección con cámara | Implementado en código; requiere validación física por escenario |
 | Vibración / acelerómetro | Señalización táctil y análisis de vibraciones | Implementado en código; requiere acoplamiento físico y pruebas |
@@ -38,7 +41,7 @@ Los canales tienen limitaciones diferentes: BLE exige alcance radioeléctrico y 
 | Preferencias | Almacena el callsign con AndroidX DataStore | Implementado |
 | Historial permanente, ACK extremo a extremo, cifrado propio, entrega garantizada | No disponibles en el chat BLE actual | Pendiente / fuera del alcance presente |
 
-En los Issues [#1](https://github.com/NicoButter/beaconchat/issues/1) y [#2](https://github.com/NicoButter/beaconchat/issues/2) están los requisitos. Sus implementaciones se integraron a `main`; los resultados de **17 tests** (#1) y **48 tests totales** (#2) provienen de los informes de ejecución de Codex, no de una certificación ni de ensayos de campo.
+En los Issues [#1](https://github.com/NicoButter/beaconchat/issues/1) y [#2](https://github.com/NicoButter/beaconchat/issues/2) están los requisitos iniciales. El informe previo registra **144 tests JVM y APK debug** con Gradle 8.13/JDK 21; esa base se reejecutó antes de esta iteración. La implementación SOS eleva la suite a **183 tests aprobados (144 + 39), sin fallos**, y APK debug compilada. Son pruebas automatizadas y compilación, **no certificación ni ensayos de GPS/BLE físico**. [Evidencia y límites](PSI/Validacion-BeaconChat.md).
 
 ## Arquitectura
 
@@ -49,11 +52,14 @@ flowchart TB
     UI --> BLE["BLEMeshController"]
     UI --> RX["Receptores / analizadores"]
     UI --> DS["AndroidX DataStore · callsign"]
+    UI --> SOS["SOS local y GPS_PROVIDER<br/>solo primer plano"]
+    SOS -. "solo ensayo sintético / sin posición" .-> MESH["Adaptador mesh Android<br/>codec, cola y reensamblado"]
     EM --> SIGNAL["Linterna · sonido · vibración · beacon BLE SOS"]
     BLE --> DIRECT["BLE: advertising + scanning + GATT directo"]
     RX --> SENSORS["CameraX · acelerómetro · QR · BLE scanner"]
     CORE["MeshEngine + MeshMessage<br/>Lógica pura, JVM y simulaciones"]
-    CORE -. "No conectado todavía" .-> BLE
+    CORE <--> MESH
+    MESH <--> BLE
 ```
 
 ### BLE directo: qué confirma realmente el envío
@@ -70,16 +76,22 @@ sequenceDiagram
     Note over A,B: Éxito GATT ≠ ACK de aplicación ni mensaje leído
 ```
 
-### Mesh multisalto: objetivo, todavía no disponible en teléfonos
+### Mesh multisalto: código integrado, validación física pendiente
 
 ```mermaid
 flowchart LR
-    A["Teléfono A · origen"] -->|"BLE futuro"| B["Teléfono B · repetidor"]
-    B -->|"BLE futuro"| C["Teléfono C · destino"]
+    A["Teléfono A · origen"] -->|"BLE experimental"| B["Teléfono B · repetidor"]
+    B -->|"BLE experimental"| C["Teléfono C · destino"]
     A -. "Sin enlace directo" .- C
 ```
 
-El motor lógico contempla recepción, validación, deduplicación de `(originId, messageId)`, entrega local, decremento de TTL y cola de reenvío. Hoy esas decisiones se verifican mediante topologías simuladas: **no hay retransmisión BLE multisalto ni fragmentación de frames mesh**. Su formato lógico puede exceder los 20 bytes del transporte actual.
+El motor valida, deduplica por `(originId, messageId)`, entrega localmente y descuenta TTL una vez por salto. Su adaptador Android intercambia identidades declaradas, fragmenta en tramas de hasta 20 bytes y usa escrituras/recibos secuenciales con límites y timeout. El chat directo conserva su característica y formato anteriores. **Admitido en cola y escrito en enlace no confirman entrega al destino final.** Las identidades declaradas y CRC32 no aportan autenticación ni cifrado.
+
+### Laboratorio SOS offline
+
+En **Mesh Radar → Laboratorio SOS offline** se puede solicitar GPS con espera configurable de 1–120 s, crear un SOS local con la posición disponible o sin coordenadas y preparar por separado ensayos mesh. Android 12+ requiere pedir ubicación precisa y aproximada juntas; si solo se concede aproximada, el laboratorio informa que no dispone de GPS preciso y permite continuar sin posición. No se solicita ubicación en segundo plano ni se usan Wi-Fi, datos, geocodificación o mapas.
+
+La posición real y la nota local no se copian al ensayo. El envío permite únicamente SOS de laboratorio con una posición sintética fija (`12.3456, -45.6789`) o sin ubicación. Cada reintento conserva UUID y contenido del incidente; cada intento mesh tiene su propio ID. La captura se cancela al pausar/cerrar y no se persiste el SOS local. **No se transmite GNSS real sobre el mesh sin cifrado.** La adquisición física sigue pendiente de prueba; un timeout no inventa `(0,0)`.
 
 ## Tecnologías y dependencias
 
@@ -136,7 +148,7 @@ Los scripts `Makefile` y `deploy-to-phone.sh` tienen hoy un `JAVA_HOME` específ
 
 **Toda la documentación de ingeniería del proyecto está en [`PSI/`](PSI/)**, sin subcarpetas por evento ni documentos de un mismo tipo en múltiples ubicaciones. Incluye [requerimientos](PSI/ERS-BeaconChat.md), [casos de uso](PSI/Casos-de-Uso-BeaconChat.md), [arquitectura](PSI/Diseño-Arquitectura-BeaconChat.md), [validación BLE y mesh](PSI/Validacion-BeaconChat.md), [protocolo óptico](PSI/Protocolo-Optico-BeaconChat.md), [factibilidad](PSI/Factibilidad-BeaconChat.md), [roadmap](PSI/Roadmap-BeaconChat.md), [trazabilidad](PSI/Trazabilidad-BeaconChat.md), [desarrollo](PSI/Guia-Desarrollo-BeaconChat.md) y [material para el Rally 2026](PSI/Guia-Rally-2026.md).
 
-La documentación distingue el prototipo existente de la **propuesta futura de SOS geolocalizado (GNSS/GPS) transmitido por nodos BLE mesh hasta un gateway con Internet**. Estas capacidades integradas todavía no funcionan en teléfonos reales. La aplicación mantiene sus recursos gráficos sin alteraciones en `assets/`.
+La documentación distingue código Android implementado, simulaciones aprobadas y validación física pendiente. SOS local/GPS y ensayos mesh sintéticos están implementados; **la transmisión protegida de coordenadas reales, gateway y centro siguen siendo propuestas futuras**. La aplicación mantiene sus recursos gráficos sin alteraciones en `assets/`.
 
 ## Organización del repositorio
 
@@ -151,9 +163,10 @@ La documentación distingue el prototipo existente de la **propuesta futura de S
 ## Roadmap
 
 1. **BLE A↔B:** integrado en código, pendiente de prueba con hardware.
-2. **Núcleo mesh lógico:** integrado y cubierto por simulaciones JVM; sin adaptador BLE.
-3. **Integración física A→B→C:** definir serialización, fragmentación/reensamblado, compatibilidad y retransmisión; luego probar en tres equipos.
-4. Mejorar confirmaciones, identidad, seguridad, fiabilidad y validación de campo según evidencia.
+2. **Mesh Android:** codec, fragmentación, sesiones, cola y relay integrados; validar A→B→C con extremos aislados en tres equipos.
+3. **SOS offline:** modelo/codec y captura GPS implementados; ensayos mesh solo sintéticos o sin posición. Validar GNSS físico y permisos/cancelación por versión.
+4. Resolver autenticación, cifrado y privacidad antes de habilitar coordenadas reales en tránsito; después evaluar fiabilidad, confirmaciones y persistencia.
+5. Gateway, backend, mapas, cuentas y LoRa permanecen fuera de esta iteración.
 
 ## Autor, colaboración y licencia
 
@@ -204,8 +217,11 @@ Every medium has constraints: BLE requires compatible radios within range; light
 | --- | --- | --- |
 | Direct BLE chat | Peer discovery plus short GATT messages | Implemented; **A↔B physical test pending** |
 | Direct BLE protocol | UTF-8 `CALLSIGN:MESSAGE` frames up to **20 bytes total** | Unit tests reported; no fragmentation |
-| Logical mesh core | Stable node/message identities, TTL, bounded dedupe, FIFO queue, simulated transport | **31 new JVM tests reported**; not connected to BLE |
-| Multi-hop A→B→C | Actual relay across Android devices | **Not implemented on hardware** |
+| Android mesh core and transport | Logical IDs, TTL/dedupe, V1 codec, ≤20-byte fragments, bounded reassembly and dedicated GATT | Implemented and integrated; policy tested with fake GATT; **physical radio validation pending** |
+| Multi-hop A→B→C | Bounded queue and relay through neighbors with session-declared identities | Android path implemented; chain/diamond/ring simulated; **not verified between phones** |
+| Structured offline SOS | Stable UUID, declared type/severity, creation time, note and optional position; up to 433 bytes encoded | Implemented; **39 new JVM tests** for SOS/GNSS/privacy/integration |
+| Local GPS/GNSS | `LocationManager.GPS_PROVIDER`, precise permission, timeout/cancellation; fresh, last-known or absent position | Android component implemented; **real satellite acquisition unverified** |
+| SOS mesh laboratory | Fixed synthetic location or no location, with decoded SOS reception | Integrated in Mesh Radar; **real GNSS SOS coordinates blocked** at origin and relay |
 | Emergency BLE beacon | BLE advertisement-based emergency signal transmission/detection | Implemented in code; range/reliability not certified |
 | Optical Morse | Flashlight encoding and camera decoding | Implemented in code; scenario-specific testing needed |
 | Haptics / accelerometer | Tactile signaling and vibration detection | Implemented in code; requires favorable physical conditions |
@@ -214,7 +230,7 @@ Every medium has constraints: BLE requires compatible radios within range; light
 | DataStore | Persistent callsign preference | Implemented |
 | Durable chat history, app-level end-to-end ACK, custom encryption, guaranteed delivery | Not available for current direct BLE chat | Planned or out of scope |
 
-Work for [Issue #1](https://github.com/NicoButter/beaconchat/issues/1) and [Issue #2](https://github.com/NicoButter/beaconchat/issues/2) is now merged into `main`. **17 tests** for #1 and **48 total tests** for #2 were reported in Codex execution notes; these are not independent certification or field test results.
+The initial requirements are in [Issue #1](https://github.com/NicoButter/beaconchat/issues/1) and [Issue #2](https://github.com/NicoButter/beaconchat/issues/2). The previous report recorded **144 JVM tests and a debug APK** with Gradle 8.13/JDK 21; that baseline was rerun before this iteration. SOS raises the suite to **183 passing tests (144 + 39), zero failures**, with a compiled debug APK. These are automated tests and build evidence, **not physical GPS/BLE validation or certification**. [Evidence and limitations](PSI/Validacion-BeaconChat.md).
 
 ## Architecture
 
@@ -225,11 +241,14 @@ flowchart TB
     UI --> BLE["BLEMeshController"]
     UI --> RX["Receivers / analyzers"]
     UI --> DS["AndroidX DataStore · callsign"]
+    UI --> SOS["Local SOS and GPS_PROVIDER<br/>foreground only"]
+    SOS -. "synthetic / no-position tests only" .-> MESH["Android mesh adapter<br/>codec, queue and reassembly"]
     EM --> SIGNAL["Flashlight · sound · vibration · BLE SOS beacon"]
     BLE --> DIRECT["BLE: advertising + scanning + direct GATT"]
     RX --> SENSORS["CameraX · accelerometer · QR · BLE scanner"]
     CORE["MeshEngine + MeshMessage<br/>Pure Kotlin logic and JVM simulations"]
-    CORE -. "Not integrated yet" .-> BLE
+    CORE <--> MESH
+    MESH <--> BLE
 ```
 
 ### Direct BLE: what a successful write actually means
@@ -246,16 +265,22 @@ sequenceDiagram
     Note over A,B: GATT success ≠ application-level ACK or read receipt
 ```
 
-### Multi-hop: a future hardware objective, not a working BLE feature
+### Multi-hop: integrated code, physical validation pending
 
 ```mermaid
 flowchart LR
-    A["Phone A · source"] -->|"Future BLE"| B["Phone B · relay"]
-    B -->|"Future BLE"| C["Phone C · destination"]
+    A["Phone A · source"] -->|"Experimental BLE"| B["Phone B · relay"]
+    B -->|"Experimental BLE"| C["Phone C · destination"]
     A -. "No direct link" .- C
 ```
 
-The logical core validates incoming messages, deduplicates by `(originId, messageId)`, decides local delivery, decrements TTL and queues potential forwarding. These behaviors are covered through simulated network topologies only. **No multi-hop BLE relay or mesh frame fragmentation is currently integrated.** Logical messages may exceed the 20-byte current GATT packet budget.
+The engine validates messages, deduplicates by `(originId, messageId)`, delivers locally and decrements TTL once per logical hop. Its Android adapter exchanges declared identities, fragments into ≤20-byte frames, and performs sequential writes/receipts with limits and timeouts. Direct chat keeps its existing characteristic and format. **Queue admission and link writes do not confirm final-destination delivery.** Declared identities and CRC32 provide neither authentication nor encryption.
+
+### Offline SOS laboratory
+
+In **Mesh Radar → Laboratorio SOS offline**, request GPS with a configurable 1–120 s timeout, create a local SOS with the available position or without coordinates, and separately prepare mesh trials. Android 12+ requests precise and approximate location permissions together; approximate-only access reports that precise GPS is unavailable and still permits a positionless SOS. No background location, Wi-Fi/data provider, geocoding or online maps are used.
+
+Real positions and local notes are never copied into the mesh trial. Only laboratory SOS records with a fixed synthetic position (`12.3456, -45.6789`) or no position may be sent. Retries preserve the incident UUID/content; mesh attempts have distinct IDs. Capture is cancelled on pause/close and local SOS records are not persisted. **Real GNSS data is blocked from the unencrypted mesh.** Physical acquisition remains untested; missing positions are never replaced with `(0,0)`.
 
 ## Technologies and dependencies
 
@@ -310,7 +335,7 @@ The optional `Makefile` and `deploy-to-phone.sh` currently hardcode a Fedora-spe
 
 ## Single documentation directory
 
-All requirements, use cases, architecture, testing, feasibility, optical protocol, deployment and the SOS/GNSS/mesh/gateway proposal are documented under **[`PSI/`](PSI/)**. See [requirements](PSI/ERS-BeaconChat.md), [use cases](PSI/Casos-de-Uso-BeaconChat.md), [architecture](PSI/Diseño-Arquitectura-BeaconChat.md) and [validation](PSI/Validacion-BeaconChat.md). The geolocated SOS multi-hop solution is planned, **not yet integrated into real devices**.
+All engineering documentation remains under **[`PSI/`](PSI/)**. See [requirements](PSI/ERS-BeaconChat.md), [use cases](PSI/Casos-de-Uso-BeaconChat.md), [architecture](PSI/Diseño-Arquitectura-BeaconChat.md) and [validation](PSI/Validacion-BeaconChat.md). Documentation separates implemented Android code, passing simulations and pending physical validation. Local SOS/GPS and synthetic mesh trials exist; **protected transmission of real coordinates, a gateway and an operations center remain future work**.
 
 ## Repository documentation
 
@@ -325,9 +350,10 @@ All requirements, use cases, architecture, testing, feasibility, optical protoco
 ## Roadmap
 
 1. **Direct A↔B BLE:** merged, awaiting physical tests.
-2. **Logical mesh core:** merged and exercised in JVM simulations, not wired to BLE.
-3. **A→B→C physical integration:** define framing, fragmentation/reassembly, compatibility, forwarding and three-phone tests.
-4. Future work based on evidence: acknowledgments, identity, security, reliability and field evaluation.
+2. **Android mesh:** codec, fragmentation, sessions, queue and relay integrated; verify A→B→C on three phones with isolated endpoints.
+3. **Offline SOS:** model/codec and GPS acquisition implemented; mesh trials use only synthetic or absent positions. Verify physical GNSS and permissions/cancellation across Android versions.
+4. Resolve authentication, encryption and privacy before enabling real-coordinate transit; then evaluate reliability, acknowledgments and persistence.
+5. Gateways, backend, maps, accounts and LoRa are outside this iteration.
 
 ## Author, contributions and license
 

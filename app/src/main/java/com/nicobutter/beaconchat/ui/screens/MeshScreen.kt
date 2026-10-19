@@ -46,6 +46,7 @@ import com.nicobutter.beaconchat.mesh.ble.MeshBleSnapshot
 import com.nicobutter.beaconchat.mesh.ble.MeshActivityKind
 import com.nicobutter.beaconchat.mesh.core.NodeId
 import java.util.UUID
+import com.nicobutter.beaconchat.sos.SosCodec
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -81,6 +82,7 @@ fun MeshScreen(
     val bluetoothEnabled by meshController.bluetoothEnabled.collectAsState()
     val experimentalState by meshController.experimentalMesh.state.collectAsState()
     var showExperimental by remember { mutableStateOf(false) }
+    var showSos by remember { mutableStateOf(false) }
 
     val callsign by userPreferences.callsign.collectAsState(initial = "UNKNOWN")
 
@@ -331,6 +333,9 @@ fun MeshScreen(
                 OutlinedButton(onClick = { showExperimental = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("Mesh experimental: ${if (experimentalState.enabled) "activo" else "inactivo"} · ${experimentalState.queued} en cola")
                 }
+                OutlinedButton(onClick = { showSos = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Laboratorio SOS offline")
+                }
                 Spacer(modifier = Modifier.height(16.dp))
 
                 if (lastError != null) {
@@ -413,6 +418,9 @@ fun MeshScreen(
             onSend = { destination, text, ttl -> meshController.experimentalMesh.originate(destination, text, ttl) },
             onDismiss = { showExperimental = false })
     }
+    if (showSos) {
+        SosLaboratoryDialog(experimentalState, meshController.experimentalMesh::submitSosLaboratory) { showSos = false }
+    }
 }
 
 @Composable
@@ -464,7 +472,10 @@ private fun ExperimentalMeshDialog(state: MeshBleSnapshot, available: Boolean,
                         MeshActivityKind.INFO -> "Estado local"
                     }
                     SelectionContainer { Text("$label\n${event.detail}" + (event.message?.let {
-                        "\nOrigen: ${it.originId.value}\nMensaje: ${it.messageId.value} · TTL ${it.hopsRemaining}\n${it.content}"
+                        val sos = if (it.content.startsWith(SosCodec.PREFIX)) runCatching { SosCodec.decode(it.content) }.getOrNull() else null
+                        "\nOrigen: ${it.originId.value}\nMensaje: ${it.messageId.value} · TTL ${it.hopsRemaining}\n" +
+                            (sos?.let { incident -> "SOS laboratorio ${incident.incidentId}: ${incident.type}, ${incident.severity}; " +
+                                if (incident.position == null) "sin posición" else "posición sintética" } ?: it.content)
                     } ?: ""), color = if (event.kind == MeshActivityKind.FAILURE) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurface) }
                     Divider()

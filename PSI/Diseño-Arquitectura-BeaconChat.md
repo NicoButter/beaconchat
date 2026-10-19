@@ -5,7 +5,7 @@
 
 ## Base verificable y fuentes locales
 
-Base del checkout `ac1dd8983960f6500b95433d40d6d390b5a9ebb3` de `main`, con integración mesh Android experimental agregada el 18/10/2026. Las rutas siguientes sustentan el estado; el código de multisalto y sus pruebas JVM no demuestran funcionamiento físico, y `LightMapScreen` no demuestra mapas geográficos.
+Base del checkout `4a1662d6d6f6adf322ef9681741e285b2f731df6` de `main`, coincidente con el remoto al comenzar la implementación #5. Mesh Android y SOS offline están implementados en código; sus pruebas JVM no demuestran radio ni adquisición satelital físicas, y `LightMapScreen` no demuestra mapas geográficos.
 
 | Fuente | Evidencia |
 | --- | --- |
@@ -17,13 +17,15 @@ Base del checkout `ac1dd8983960f6500b95433d40d6d390b5a9ebb3` de `main`, con inte
 | [Pruebas de topologías](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/MeshTopologyTest.kt), [red simulada](../app/src/test/java/com/nicobutter/beaconchat/mesh/core/SimulatedNetwork.kt) | Transporte simulado JVM; no uso del stack Bluetooth físico. |
 | [Integración de transporte](../app/src/test/java/com/nicobutter/beaconchat/mesh/transport/MeshTransportIntegrationTest.kt) | Topologías JVM que serializan, fragmentan, reensamblan y decodifican en cada enlace antes de entregar al motor. |
 | [Pruebas del adaptador](../app/src/test/java/com/nicobutter/beaconchat/mesh/ble/MeshBleAdapterTest.kt) | Mismo adaptador de producción, I/O GATT falso: cadena sin A↔C, diamante/anillo, fallos, cuotas y reconexión. No ejecuta el stack Android. |
+| [SosIncident](../app/src/main/java/com/nicobutter/beaconchat/sos/SosIncident.kt), [SosCodec](../app/src/main/java/com/nicobutter/beaconchat/sos/SosCodec.kt), [SosMeshPolicy](../app/src/main/java/com/nicobutter/beaconchat/sos/SosMeshPolicy.kt) | Modelo/codec V1 y frontera de privacidad para ensayos mesh; UUID estable, ubicación opcional y máximo 433 bytes de contenido. |
+| [GnssAcquisition](../app/src/main/java/com/nicobutter/beaconchat/sos/GnssAcquisition.kt), [AndroidGnssLocationSource](../app/src/main/java/com/nicobutter/beaconchat/sos/AndroidGnssLocationSource.kt), [SosLaboratoryDialog](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/SosLaboratoryDialog.kt) | Política comprobable en JVM; GPS_PROVIDER asíncrono, cancelable, en primer plano y UI local. Sin ensayo satelital. |
 | [EmergencyManager](../app/src/main/java/com/nicobutter/beaconchat/controller/EmergencyManager.kt), [BleEmitter](../app/src/main/java/com/nicobutter/beaconchat/emitter/BleEmitter.kt), [BleScanner](../app/src/main/java/com/nicobutter/beaconchat/scanner/BleScanner.kt) | Orquestación de señales y beacon SOS con un byte de tipo de emergencia. No transmite incidente ni coordenadas. |
 | [Transmisor](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/TransmitterScreen.kt), [receptor QR](../app/src/main/java/com/nicobutter/beaconchat/transceiver/QRScanner.kt), [detectores](../app/src/main/java/com/nicobutter/beaconchat/transceiver/LightDetector.kt) | Componentes ópticos/Morse, QR y otros canales locales, con validación física insuficiente. |
 | [UserPreferences](../app/src/main/java/com/nicobutter/beaconchat/data/UserPreferences.kt) | Callsign en DataStore; no repositorio durable de SOS. |
-| [Gradle de app](../app/build.gradle.kts), [manifiesto](../app/src/main/AndroidManifest.xml) | SDK 24/34, BLE y permisos. Ubicación hasta API 30 para scan BLE; sin permiso INTERNET ni servicio de incidentes. |
+| [Gradle de app](../app/build.gradle.kts), [manifiesto](../app/src/main/AndroidManifest.xml) | SDK 24/34 y BLE; ubicación FINE/COARSE en todas las versiones para GPS y hasta API 30 también para scan BLE. Sin permiso INTERNET ni ubicación en segundo plano. |
 | [Informe BLE](Validacion-BeaconChat.md), [informe del núcleo](Validacion-BeaconChat.md) | Resultados históricos reportados; no se reinterpretan como ensayos nuevos. |
 
-El `LocationManager` del controlador BLE solo comprueba proveedores habilitados para escaneo en Android anterior a 12. Esa comprobación no obtiene ni georreferencia un incidente. No hay componentes de GNSS para SOS, API/backend, mapas o LoRa. La integración MeshEngine↔BLE ahora existe como código experimental, con validación física pendiente.
+El `LocationManager` del controlador BLE conserva su chequeo de proveedores para scan en Android anterior a 12. La captura SOS es un componente separado que solo usa GPS_PROVIDER y permiso propio. No hay API/backend, gateway, mapas ni LoRa. GPS y MeshEngine↔BLE tienen código Android experimental compilado, sin validación física.
 
 ## Arquitectura AS-IS
 
@@ -33,6 +35,9 @@ flowchart TB
     UI --> BC["E: BLEMeshController"]
     UI --> RX["E: recepción y análisis local"]
     UI --> PREF["E: UserPreferences / DataStore"]
+    UI --> SOSLAB["E: laboratorio SOS local<br/>modelo y codec V1"]
+    SOSLAB --> GPS["E: GPS_PROVIDER<br/>permiso, timeout y cancelación"]
+    SOSLAB -. "solo sintético / sin posición" .-> POLICY
     EM --> SIG["E: luz, vibración, audio y beacon SOS"]
     RX --> SENSOR["E: CameraX, acelerómetro, QR y BLE scanner"]
     BC --> RADIO["E: advertising, scan y GATT A-B"]
@@ -81,7 +86,19 @@ Hay hasta 16 vecinos, 8 trabajos incluyendo el activo, 8 sesiones entrantes y 32
 
 El diálogo “Mesh experimental” de `MeshScreen` permite activar/desactivar participación, originar pruebas con destino opcional y TTL, copiar NodeId y consultar vecinos/actividad. La participación mantiene scan/publicidad en primer plano y se desactiva al pausar/salir. La UI distingue origen local, cola local, escrito en enlace y recibido localmente. **Handoff y recibo de trama no confirman el destino final.** No hay ACK extremo a extremo, autenticación ni cifrado.
 
-El [contrato completo, cuotas, resultados y procedimiento de tres Android](Validacion-BeaconChat.md) registra **144 tests JVM aprobados**, incluidos 34 nuevos del adaptador. La ruta Android/GATT está implementada y compilada; su ejecución física A↔B y A→B→C continúa pendiente. No se agregan GPS, gateway, servidor ni mapas.
+El informe previo registró **144 tests JVM** del motor/transporte/adaptador, reejecutados antes de #5. Ahora [Validación](Validacion-BeaconChat.md) registra **183 aprobados**, incluidos 39 nuevos SOS/GNSS. La ruta Android/GATT está implementada y compilada; su ejecución física A↔B y A→B→C continúa pendiente. Gateway, servidor y mapas siguen fuera del código.
+
+### SOS offline y separación de datos reales/sintéticos
+
+`SosIncident` es un cuerpo inmutable con UUID, versión, tipo, gravedad declarada, creación local, nota opcional y `SosPosition?`. La ubicación ausente es null; (0,0) solo puede ser una coordenada explícita válida. Fuente GNSS/sintética/mock, precisión estimada opcional, edad no negativa y validez deben ser coherentes. Nota ≤256 bytes UTF-8 estrictos; el codec usa prefijo `BCSOS:` más base64url canónico sin padding de un registro binario big endian, de hasta **433 bytes ASCII**. No modifica MeshMessageCodec ni fragmentación. [Contrato exacto](Validacion-BeaconChat.md).
+
+`AndroidGnssLocationSource` registra GPS_PROVIDER con LocationManager y entrega callbacks en main, sin esperar sincrónicamente un fix. No usa proveedor de red ni geocodificador. Pide permiso preciso en primer plano, también API 31+, ofreciendo degradación sin posición ante acceso aproximado/denegado. Timeout configurable 1..120 s (30 s predeterminado), cancelación y baja de listeners al pausar/cerrar/destruir. `GnssAcquisition` mantiene un único candidato y valida tokens, vencimiento y edad mediante tiempo monotónico local. El fix cacheado nunca se marca como nuevo; CURRENT exige callback de ≤30 s y más de 5 min se rotula STALE. La edad se recalcula al crear el SOS; su cuerpo fija esa instantánea y la UI la identifica como tal. GPS_PROVIDER no demuestra por sí solo observación satelital: mocks se rotulan aparte.
+
+La UI mantiene el SOS real en memoria local no guardada y lo descarta al pausar/cerrar; no lo añade al historial mesh ni lo persiste. Una acción separada prepara un incidente de laboratorio con nuevo UUID, nota fija y posición sintética constante `12.3456,-45.6789`, o sin coordenadas. No copia ubicación ni nota local. `SosMeshGateway` conserva UUID/cuerpo del SOS durante reintentos; cada intento usa un nuevo messageId mesh para no confundirlo con un duplicado del mismo intento. Esto no implementa deduplicación central de incidentes.
+
+`SosMeshPolicy` se aplica tanto en origen como después de reensamblar/decodificar y antes de MeshEngine.receive. Solo acepta SOS marcados laboratorio con posición fija o ausente; bloquea GNSS/mock real, coordenadas arbitrarias con etiqueta sintética y prefijos SOS malformados sin guardar el contenido en eventos. Chat normal y protocolo directo permanecen. Es una barrera de aplicación para el espacio `BCSOS:`, no autenticación, cifrado ni un detector de coordenadas escritas en texto arbitrario. Un peer antiguo no conoce esta política; no se envían datos reales para comprobarlo.
+
+“Laboratorio SOS offline” permite seleccionar tipo/gravedad, solicitar GPS, crear local/sin posición y emitir/reintentar solo el ensayo. Recibir el mensaje interpreta el SOS y muestra su UUID, fuente y estado local. Origen local, admisión en cola y escrito en enlace siguen separados de recepción local y de **destino final sin confirmar**. Captura satelital, UI/permisos sobre Android y radio física permanecen pendientes; no es rescate operativo.
 
 ## Arquitectura TO-BE, íntegramente propuesta
 
@@ -106,7 +123,7 @@ Cada teléfono compatible podría ser origen/retransmisor/gateway según conecti
 
 ### Integración, seguridad y presupuesto de bytes
 
-Se conserva el chat directo; transporte V1 y adaptador Android experimental ya están implementados arriba con descubrimiento explícito de características mesh separadas. El mensaje SOS rico sigue siendo una propuesta: excederá el presupuesto directo con UUID, tiempos, posición y protección; no se enviará como texto truncado en `CALLSIGN:MENSAJE`.
+Se conserva el chat directo; transporte V1, adaptador Android y SOS mínimo ya están implementados arriba. El sistema SOS protegido hasta un centro sigue propuesto: agregará protección/datos de dominio y no se enviará como texto truncado en `CALLSIGN:MENSAJE`. Hoy solo se habilitan ensayos sintéticos o sin ubicación en mesh.
 
 El serializer V1 usa **53 + L bytes** unicast: con `HOLA` son 57, aun sin ubicación ni criptografía. Su fragmentador genera 8 tramas para ese mensaje. El presupuesto SOS futuro deberá sumar datos de dominio y protección, y revisar el límite actual de 1024 bytes de contenido. El reensamblador existente incorpora índices, cantidad, longitud total, CRC32, timeout y cuotas por sesión/globales; la pérdida de un fragmento impide entregar al núcleo, pero no desencadena recuperación automática.
 
@@ -182,7 +199,7 @@ sequenceDiagram
 
 ## Modelo conceptual de datos propuesto
 
-Este modelo no existe como clases de incidentes, esquema SQL ni API en el repositorio. Es una base de discusión; el formato lógico actual solo tiene los campos de MeshMessage descritos arriba.
+El modelo central completo siguiente sigue propuesto, sin esquema SQL ni API. `SosIncident` implementa ahora el subconjunto local UUID/tipo/gravedad/creación/nota/posición y calidad; no implementa incidentes centrales, comprobantes, roles, ubicación manual ni custodia durable. Sus campos/contrato V1 se describen arriba y en Validación, separados de esta propuesta ampliada.
 
 | Entidad / campo | Semántica y validación propuesta |
 | --- | --- |
@@ -280,13 +297,13 @@ Es la vista de conocimiento de un nodo, no el estado global del rescate. El cent
 | Decisión de diseño | Propuesta y consecuencia | Pendiente antes de código/operación |
 | --- | --- | --- |
 | AD-01 · BLE como cadena mínima | Reutilizar componentes, separar chat legado y mesh; no requerir LoRa | Codec/fragmentos y adaptador GATT experimental implementados; faltan ensayos físicos y diseño de fiabilidad/identidad segura |
-| AD-02 · Ubicación honesta | GNSS independiente de Internet; manual/sin fix permitidos | Espera máxima, umbral de dato reciente, política de precisión |
+| AD-02 · Ubicación honesta | GNSS local, conocido/antiguo/ausente; manual aún propuesto | Código: 30 s fresco, 5 min conocido, timeout 1..120 s; falta ensayo satelital/precisión y envío protegido de datos reales |
 | AD-03 · Confirmar solo persistencia | Comprobante autenticable y dedupe central | Contrato API, errores, retorno mesh y conflicto de mismo ID |
 | AD-04 · Custodia separada del núcleo | No convertir FIFO temporal en promesa DTN | Retención, cuotas, recuperación, TTL e idempotencia tras reinicio |
 | AD-05 · Datos mínimos protegidos | Relays sin acceso innecesario a coordenadas/notas | Amenazas, claves offline, revocación, consentimiento y acceso |
 | AD-06 · Centro de laboratorio primero | Clasificación humana, datos sintéticos; mapas solo si hay datos válidos | Responsable de operación, licencias cartográficas, integración oficial futura |
 
-Las decisiones de SOS/centro son propuestas, no ADR históricos aprobados. El transporte V1 y la política del adaptador están probados en JVM; el puente Android/GATT está implementado y compilado, sin resultado físico todavía. No se añaden dependencias, permisos ni servicios Android en esta intervención.
+Las decisiones de centro/seguridad integral siguen propuestas, no ADR históricos aprobados. El transporte, adaptador lógico y SOS mínimo/política GNSS se prueban en JVM; GATT y GPS Android están implementados y compilados, sin resultado físico todavía. Se amplía FINE/COARSE a Android reciente para GPS; no se añaden dependencias, permiso INTERNET, ubicación de fondo ni servicios Android.
 
 
 ---

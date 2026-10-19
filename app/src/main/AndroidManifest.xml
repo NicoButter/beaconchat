@@ -15,9 +15,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
 
-    <!-- Location is required for BLE scanning on Android 6–11. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
+    <!-- Foreground GPS on all supported versions; also required for BLE scan on API 24–30. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- BLE feature -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />

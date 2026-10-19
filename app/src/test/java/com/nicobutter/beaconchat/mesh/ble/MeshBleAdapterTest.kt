@@ -8,7 +8,7 @@ import org.junit.Test
 import java.util.ArrayDeque
 
 /** Fake only replaces Bluetooth I/O; the production node, client, protocol and engine are real. */
-private class FakeGattNetwork {
+internal class FakeGattNetwork {
     data class Connection(val target: String, val session: MeshLinkSession)
     val clock = FakeClock()
     val nodes = linkedMapOf<String, MeshBleNode>()

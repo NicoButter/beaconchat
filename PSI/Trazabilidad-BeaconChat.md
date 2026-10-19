@@ -1,11 +1,11 @@
 # 10 · Trazabilidad de la propuesta
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · 16/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 18/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Casos](Casos-de-Uso-BeaconChat.md) · [Pruebas](Validacion-BeaconChat.md) · [Etapas](Roadmap-BeaconChat.md)
 
 ## Convención
 
-Se omite `R26-` en las celdas compactas: `RU-01` significa `R26-RU-01`, `PR-01` significa `R26-PR-01`, etc. Los IDs pertenecen a esta edición. Las relaciones pueden recorrerse en ambas direcciones filtrando las columnas; son cobertura documental, no porcentaje de implementación ni pruebas aprobadas. E/S/P se definen en [PSI/README](../README.md).
+Se omite `R26-` en las celdas compactas: `RU-01` significa `R26-RU-01`, `PR-01` significa `R26-PR-01`, etc. Las relaciones son cobertura documental, no porcentaje de implementación ni prueba aprobada. E/S/P se definen en [Requerimientos](ERS-BeaconChat.md). Tras #5: **183 tests JVM aprobados**, de los cuales 39 cubren SOS/GNSS/privacidad; 144 eran la base previa. GPS y BLE Android están implementados/compilados, **sin validación física**. Solo SOS de laboratorio sintético/sin posición puede transitar; GNSS real bloqueado.
 
 ## Matriz RU ↔ RF ↔ CU ↔ prueba ↔ etapa
 
@@ -14,20 +14,20 @@ Se omite `R26-` en las celdas compactas: `RU-01` significa `R26-RU-01`, `PR-01` 
 | RF-01 | RU-03, RU-08 | CU-07, CU-08 | PR-01 | E0 | E: DirectBleProtocol, BLEMeshController; 17 JVM históricos reportados, físico pendiente |
 | RF-02 | RU-08 | CU-08 | PR-03 | E0 | E: EmergencyManager, emisores, receptores y QR; ensayo por canal pendiente |
 | RF-03 | RU-02 | CU-03 | PR-02 | E0 | S: MeshEngine, MeshMessage y SimulatedNetwork; 31 JVM históricos reportados |
-| RF-04 | RU-01 | CU-01, CU-02 | PR-04 | E1 diseño, E3 implementación | P: registro SOS y validación de carga |
-| RF-05 | RU-01 | CU-01 | PR-05 | E3 | P: proveedor GNSS de incidentes |
-| RF-06 | RU-01 | CU-02 | PR-06 | E3 | P: fallback reciente/manual/sin ubicación |
-| RF-07 | RU-02 | CU-03 | PR-07, PR-08, PR-09 | E2 | P: transporte mesh BLE real y protocolo versionado |
-| RF-08 | RU-03 | CU-01, CU-04, CU-06, CU-07 | PR-10, PR-11, PR-15 | E3; recuperación E4 | P: estados y retorno de comprobante central |
+| RF-04 | RU-01 | CU-01, CU-02 | PR-04 | E3 parcial | E/S: SosIncident/SosCodec/SosMeshGateway; 16 modelo/codec + 9 integración JVM; SOS local/ensayo |
+| RF-05 | RU-01 | CU-01 | PR-05 | E3 parcial | E AndroidGnssLocationSource / S GnssAcquisition (14 tests); satélites pendientes |
+| RF-06 | RU-01 | CU-02 | PR-06 | E3 parcial | E/S conocido/antiguo/ausente con edad; manual P, Android físico pendiente |
+| RF-07 | RU-02 | CU-03 | PR-07, PR-08, PR-09 | E2 parcial | E adaptador Android / S GATT falso; radio A→B→C pendiente |
+| RF-08 | RU-03 | CU-01, CU-04, CU-06, CU-07 | PR-04, PR-10, PR-11, PR-15 | E3 parcial; recuperación E4 | E estados locales/cola/enlace/sin confirmar; comprobante central P |
 | RF-09 | RU-04 | CU-04, CU-06 | PR-10 | E3; reintento durable E4 | P: gateway dinámico HTTPS |
 | RF-10 | RU-04, RU-05 | CU-04, CU-05, CU-06 | PR-11 | E3 | P: API, idempotencia y confirmación persistente |
 | RF-11 | RU-05 | CU-02, CU-05 | PR-12 | E3 | P: mapa/lista, filtros y clasificación humana |
 | RF-12 | RU-06 | CU-03, CU-04, CU-06 | PR-09, PR-10, PR-13 | E4 | P: custodia durable, cuotas, expiración y reintentos |
-| RF-13 | RU-07 | CU-01, CU-03, CU-04, CU-05, CU-09 | PR-14, PR-15 | E3–E5 | P: privacidad, permisos, autenticación, protección y roles |
+| RF-13 | RU-07 | CU-01, CU-03, CU-04, CU-05, CU-09 | PR-04, PR-14, PR-15 | E3–E5 | E permisos/bloqueo GNSS real en origen y relay; criptografía/roles P |
 | RF-14 | RU-09 | CU-10 | PR-17 | E4–E5 | P: recursos, brigadistas, rutas y prioridad asistida humana |
 | RF-15 | RU-09 | CU-10 | PR-18 | E5 opcional | P: LoRa con dispositivo/gateway externo |
 
-Los componentes actuales enlazados y sus límites están en [04 · Fuentes](Diseño-Arquitectura-BeaconChat.md). Un caso de uso con varias funciones E/S/P no hereda el estado más avanzado: CU-03 solo tiene lógica S y no tránsito físico; CU-07 integral sigue P aunque use RF-01 como antecedente de confirmación local.
+Los componentes y sus límites están en [Arquitectura](Diseño-Arquitectura-BeaconChat.md). Un caso completo no hereda el estado más avanzado de una parte: CU-03 tiene tránsito Android implementado y simulación aprobada, pero sin radio probada; CU-01/02 tienen SOS local, no centro ni coordenadas reales en tránsito; CU-07 central sigue P.
 
 ## Cobertura de atributos y restricciones
 
@@ -44,14 +44,14 @@ Los componentes actuales enlazados y sus límites están en [04 · Fuentes](Dise
 | RNF-09 | RF-01, RF-03, RF-07, RF-10 | CU-03, CU-05, CU-08 | PR-19 | E1 y cada cambio futuro / P continuo |
 | RNF-10 | RF-02, RF-05, RF-07, RF-12 | CU-01, CU-03, CU-06, CU-08 | PR-16 | E2–E4 / P |
 | RS-01 | RF-01, RF-02, RF-07 | CU-03, CU-08 | PR-01, PR-03, PR-08 | E0 configuración E; compatibilidad futura P |
-| RS-02 | RF-01, RF-05, RF-06, RF-13 | CU-01, CU-02, CU-08, CU-09 | PR-01, PR-05, PR-06, PR-15 | E0 BLE E; E3 GNSS P |
-| RS-03 | RF-05, RF-06 | CU-01, CU-02 | PR-05, PR-06 | E3 / P |
-| RS-04 | RF-07 | CU-03 | PR-07 | E2 / P |
+| RS-02 | RF-01, RF-05, RF-06, RF-13 | CU-01, CU-02, CU-08, CU-09 | PR-01, PR-05, PR-06, PR-15 | E permisos BLE/GPS; denegación/approx/lifecycle físicos pendientes |
+| RS-03 | RF-05, RF-06 | CU-01, CU-02 | PR-05, PR-06 | E GPS_PROVIDER / S política; satélites pendientes |
+| RS-04 | RF-07 | CU-03 | PR-07 | E/S codecs/fragmentos y SOS V1; criptografía P |
 | RS-05 | RF-01, RF-02, RF-07, RF-12 | CU-03, CU-06, CU-08 | PR-01, PR-08, PR-13, PR-16 | E2–E4 continuidad P; pausa actual E |
 | RS-06 | RF-10, RF-11, RF-13 | CU-05, CU-09 | PR-11, PR-12, PR-14 | E3–E5 / P |
 | RS-07 | RF-09 | CU-04, CU-06 | PR-10 | E3 / P |
 | RS-08 | RF-15 | CU-10 | PR-18 | E5 opcional / P |
-| RS-09 | RF-03, RF-07 | CU-03 | PR-02, PR-07, PR-09 | E0 contrato S; E2 host BLE P |
+| RS-09 | RF-03, RF-07 | CU-03 | PR-02, PR-07, PR-09 | E/S contrato, host Android y colas; radio pendiente |
 
 ## Escenarios críticos del Issue #6
 
