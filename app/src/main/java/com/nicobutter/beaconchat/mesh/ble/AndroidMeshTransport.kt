@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 import com.nicobutter.beaconchat.sos.SosIncident
 import com.nicobutter.beaconchat.sos.SosMeshGateway
+import com.nicobutter.beaconchat.sos.gateway.AndroidSosInternetGateway
 
 /** Android I/O only. Node/client policy is shared with JVM tests; all Bluetooth state is on main. */
 @Suppress("DEPRECATION", "MissingPermission")
@@ -28,6 +29,7 @@ class AndroidMeshTransport(context: Context) {
     val state = _state.asStateFlow()
     private var node: MeshBleNode? = null
     private var directBusy = false
+    val internetGateway = AndroidSosInternetGateway(this.context)
     private var activeGatt: BluetoothGatt? = null
     private var activeToken: Long? = null
     private val incoming = linkedMapOf<String, MeshLinkSession>()
@@ -36,6 +38,7 @@ class AndroidMeshTransport(context: Context) {
     private val ticker = object : Runnable {
         override fun run() {
             node?.tick()
+            internetGateway.tick()
             if (_state.value.enabled) handler.postDelayed(this, 1_000)
         }
     }
@@ -52,7 +55,8 @@ class AndroidMeshTransport(context: Context) {
                     "No se pudo persistir NodeId"
                 }
                 handler.post {
-                    node = MeshBleNode(NodeId(identity), clock, MeshGattPort(::execute), { _state.value = it }, ::expireIncoming)
+                    node = MeshBleNode(NodeId(identity), clock, MeshGattPort(::execute), { _state.value = it },
+                        ::expireIncoming, internetGateway::onAcceptedMesh)
                     node!!.setDirectBusy(directBusy)
                 }
             } catch (e: Exception) {
@@ -63,9 +67,14 @@ class AndroidMeshTransport(context: Context) {
     }
 
     fun setEnabled(value: Boolean) {
+        if (!value) internetGateway.disable()
         node?.setEnabled(value)
         handler.removeCallbacks(ticker)
         if (value && _state.value.enabled) handler.postDelayed(ticker, 1_000)
+    }
+    fun enableInternetGateway(endpoint: String) {
+        check(_state.value.enabled) { "Activá primero la participación mesh" }
+        internetGateway.enable(endpoint)
     }
     fun setDirectBusy(value: Boolean) { directBusy = value; node?.setDirectBusy(value) }
     fun discovered(address: String) { node?.discovered(address) }

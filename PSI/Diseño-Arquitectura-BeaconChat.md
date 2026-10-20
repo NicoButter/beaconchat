@@ -1,11 +1,11 @@
 # 04 · Arquitectura actual y propuesta
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 18/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 20/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Casos de uso](Casos-de-Uso-BeaconChat.md)
 
 ## Base verificable y fuentes locales
 
-Base del checkout `4a1662d6d6f6adf322ef9681741e285b2f731df6` de `main`, coincidente con el remoto al comenzar la implementación #5. Mesh Android y SOS offline están implementados en código; sus pruebas JVM no demuestran radio ni adquisición satelital físicas, y `LightMapScreen` no demuestra mapas geográficos.
+Base del checkout `1ad627541911a647d35b9deb5188c8bcb017adad` de `main`, limpia al comenzar #6. Mesh Android, SOS offline y gateway HTTPS sintético están implementados en código; sus pruebas JVM no demuestran radio ni adquisición satelital físicas, y `LightMapScreen` no demuestra mapas geográficos.
 
 | Fuente | Evidencia |
 | --- | --- |
@@ -22,10 +22,10 @@ Base del checkout `4a1662d6d6f6adf322ef9681741e285b2f731df6` de `main`, coincide
 | [EmergencyManager](../app/src/main/java/com/nicobutter/beaconchat/controller/EmergencyManager.kt), [BleEmitter](../app/src/main/java/com/nicobutter/beaconchat/emitter/BleEmitter.kt), [BleScanner](../app/src/main/java/com/nicobutter/beaconchat/scanner/BleScanner.kt) | Orquestación de señales y beacon SOS con un byte de tipo de emergencia. No transmite incidente ni coordenadas. |
 | [Transmisor](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/TransmitterScreen.kt), [receptor QR](../app/src/main/java/com/nicobutter/beaconchat/transceiver/QRScanner.kt), [detectores](../app/src/main/java/com/nicobutter/beaconchat/transceiver/LightDetector.kt) | Componentes ópticos/Morse, QR y otros canales locales, con validación física insuficiente. |
 | [UserPreferences](../app/src/main/java/com/nicobutter/beaconchat/data/UserPreferences.kt) | Callsign en DataStore; no repositorio durable de SOS. |
-| [Gradle de app](../app/build.gradle.kts), [manifiesto](../app/src/main/AndroidManifest.xml) | SDK 24/34 y BLE; ubicación FINE/COARSE en todas las versiones para GPS y hasta API 30 también para scan BLE. Sin permiso INTERNET ni ubicación en segundo plano. |
+| [Gradle de app](../app/build.gradle.kts), [manifiesto](../app/src/main/AndroidManifest.xml) | SDK 24/34 y BLE; ubicación FINE/COARSE en todas las versiones para GPS y hasta API 30 también para scan BLE. INTERNET y ACCESS_NETWORK_STATE para gateway opt-in; sin ubicación en segundo plano. |
 | [Informe BLE](Validacion-BeaconChat.md), [informe del núcleo](Validacion-BeaconChat.md) | Resultados históricos reportados; no se reinterpretan como ensayos nuevos. |
 
-El `LocationManager` del controlador BLE conserva su chequeo de proveedores para scan en Android anterior a 12. La captura SOS es un componente separado que solo usa GPS_PROVIDER y permiso propio. No hay API/backend, gateway, mapas ni LoRa. GPS y MeshEngine↔BLE tienen código Android experimental compilado, sin validación física.
+El `LocationManager` del controlador BLE conserva su chequeo de proveedores para scan en Android anterior a 12. La captura SOS es un componente separado que solo usa GPS_PROVIDER y permiso propio. Hay gateway HTTPS de laboratorio desactivado por defecto; no hay API/backend real, mapas ni LoRa. GPS y MeshEngine↔BLE tienen código Android experimental compilado, sin validación física.
 
 ## Arquitectura AS-IS
 
@@ -49,6 +49,9 @@ flowchart TB
     WIRE --> TEST["S: integración y topologías JVM"]
     POLICY --> TEST
     CORE --> OLDTEST["S: SimulatedNetwork / tests del núcleo"]
+    POLICY -->|"solo ACCEPTED, incluso tránsito"| GW["E/S: SosInternetGateway<br/>dedupe incidente y cola volátil"]
+    GW --> HTTP["E: host Android / HTTPS opt-in"]
+    HTTP -. "sin servidor incorporado" .-> API["P: API Django/DRF de laboratorio"]
 ```
 
 La separación es descriptiva de componentes reales, no una declaración de Clean Architecture/MVVM completo. E indica código existente y S evidencia por simulación; ninguno acredita por sí solo radio probada. El chat y la mesh experimental guardan mensajes/colas en memoria. Los controladores se detienen según navegación/pausa; no hay servicio que sostenga esta mesh con pantalla bloqueada.
@@ -86,7 +89,7 @@ Hay hasta 16 vecinos, 8 trabajos incluyendo el activo, 8 sesiones entrantes y 32
 
 El diálogo “Mesh experimental” de `MeshScreen` permite activar/desactivar participación, originar pruebas con destino opcional y TTL, copiar NodeId y consultar vecinos/actividad. La participación mantiene scan/publicidad en primer plano y se desactiva al pausar/salir. La UI distingue origen local, cola local, escrito en enlace y recibido localmente. **Handoff y recibo de trama no confirman el destino final.** No hay ACK extremo a extremo, autenticación ni cifrado.
 
-El informe previo registró **144 tests JVM** del motor/transporte/adaptador, reejecutados antes de #5. Ahora [Validación](Validacion-BeaconChat.md) registra **183 aprobados**, incluidos 39 nuevos SOS/GNSS. La ruta Android/GATT está implementada y compilada; su ejecución física A↔B y A→B→C continúa pendiente. Gateway, servidor y mapas siguen fuera del código.
+La base de **183 tests JVM** se reejecutó antes de #6; ahora [Validación](Validacion-BeaconChat.md) registra **225 aprobados**, con 42 nuevos de gateway/contrato/HTTPS falso/integración. Android/GATT/GPS/HTTPS están implementados y compilados; BLE, satélites, conectividad y TLS reales siguen pendientes. El gateway está integrado, sin servidor ni mapas.
 
 ### SOS offline y separación de datos reales/sintéticos
 
@@ -99,6 +102,21 @@ La UI mantiene el SOS real en memoria local no guardada y lo descarta al pausar/
 `SosMeshPolicy` se aplica tanto en origen como después de reensamblar/decodificar y antes de MeshEngine.receive. Solo acepta SOS marcados laboratorio con posición fija o ausente; bloquea GNSS/mock real, coordenadas arbitrarias con etiqueta sintética y prefijos SOS malformados sin guardar el contenido en eventos. Chat normal y protocolo directo permanecen. Es una barrera de aplicación para el espacio `BCSOS:`, no autenticación, cifrado ni un detector de coordenadas escritas en texto arbitrario. Un peer antiguo no conoce esta política; no se envían datos reales para comprobarlo.
 
 “Laboratorio SOS offline” permite seleccionar tipo/gravedad, solicitar GPS, crear local/sin posición y emitir/reintentar solo el ensayo. Recibir el mensaje interpreta el SOS y muestra su UUID, fuente y estado local. Origen local, admisión en cola y escrito en enlace siguen separados de recepción local y de **destino final sin confirmar**. Captura satelital, UI/permisos sobre Android y radio física permanecen pendientes; no es rescate operativo.
+
+### Gateway HTTPS de laboratorio · implementación #6
+
+`SosInternetGateway` es distinto de `SosMeshGateway`: el segundo origina un SOS hacia mesh; el primero consume únicamente mensajes entrantes ya aceptados por MeshEngine. `MeshBleNode.acceptedInbound` se invoca después de la política SOS y de `receive == ACCEPTED`, para cualquier destino lógico. No consulta eventos UI ni `LOCAL_RECEIVED` y no altera TTL/relay. Mensajes rechazados/duplicados y origen local no generan entregas por este punto.
+
+Dominio y cola son Kotlin puro. `LabApiContract` define URL HTTPS versionada, DTO con campos permitidos, transporte HTTP inyectable y cliente con validador de comprobante. La huella del SOS completo detecta conflictos con el mismo UUID, incluso de nota; solo DTO/huella/estado permanecen en cola. HTTP excluye notas, identidades y GNSS reales. Se reaplica SosMeshPolicy: posición fija sintética o ausencia, sin cambiar sus bloqueos.
+
+Cuotas por gateway: 16 pendientes/64 incidentes/32 eventos, cola 5 min y dedupe 10 min desde recepción monotónica, un envío activo cada ≥5 s, hasta 3 intentos con espera 5/10 s, deadline lógico 20 s. Cola llena rechaza sin expulsar y guarda tombstone si hay memoria; memoria llena rechaza nuevos UUID. Todo es volátil; reinicio/retención vencida permite otra admisión y exige idempotencia durable futura en API. No hay custodia ni dedupe compartido entre gateways.
+
+`AndroidSosInternetGateway` serializa dominio en main; usa IO para HTTPS y disconnect. Comprueba INTERNET + VALIDATED y ausencia de portal cautivo; no garantiza acceso a la API. Un worker HTTP y como máximo uno de cancelación, conservados hasta finalizar aunque venza el deadline lógico: DNS/escritura pueden demorar según plataforma. Tokens de intento/activación rechazan resultados tardíos y evitan reutilizar consentimiento; cancelación captura la conexión anterior. Pausa/salida/mesh apagado revocan salida y descartan pendientes. Un POST ya iniciado puede quedar UNKNOWN.
+
+`HttpsLabHttpTransport` usa HttpsURLConnection con trust store y verificación hostname normales; no acepta HTTP ni redirecciones. No hay endpoints/credenciales incorporados ni autenticación implementada. INTERNET/ACCESS_NETWORK_STATE se usan para operaciones efectivas. `MeshScreen` ofrece URL y activación explícita, estados y comprobantes sin modificar laboratorio GNSS/chat. [Contrato JSON, estados, evidencia y pendientes](Validacion-BeaconChat.md).
+
+LAB_CONFIRMED exige 200/201, UUID esperado, comprobante `lab_…` válido y persistencia de laboratorio explícita; no acredita atención/rescate ni verificación independiente del guardado. Cola/GATT/TLS no confirman. No se devuelve el comprobante al origen BLE. La API falsa modela persistencia idempotente solo en memoria; Django/DRF, permisos de gateway, transacción e idempotencia real siguen pendientes. Las secciones TO-BE siguientes describen el sistema integral futuro con datos reales protegidos, no el alcance sintético actual.
+
 
 ## Arquitectura TO-BE, íntegramente propuesta
 
@@ -303,7 +321,7 @@ Es la vista de conocimiento de un nodo, no el estado global del rescate. El cent
 | AD-05 · Datos mínimos protegidos | Relays sin acceso innecesario a coordenadas/notas | Amenazas, claves offline, revocación, consentimiento y acceso |
 | AD-06 · Centro de laboratorio primero | Clasificación humana, datos sintéticos; mapas solo si hay datos válidos | Responsable de operación, licencias cartográficas, integración oficial futura |
 
-Las decisiones de centro/seguridad integral siguen propuestas, no ADR históricos aprobados. El transporte, adaptador lógico y SOS mínimo/política GNSS se prueban en JVM; GATT y GPS Android están implementados y compilados, sin resultado físico todavía. Se amplía FINE/COARSE a Android reciente para GPS; no se añaden dependencias, permiso INTERNET, ubicación de fondo ni servicios Android.
+Las decisiones de centro/seguridad integral siguen propuestas, no ADR históricos aprobados. El transporte, adaptador lógico, SOS/política GNSS y gateway sintético se prueban en JVM. GATT/GPS/HTTPS Android están compilados, sin resultado físico todavía. FINE/COARSE cubren GPS reciente; INTERNET y ACCESS_NETWORK_STATE cubren el gateway opt-in. No se añaden dependencias, ubicación de fondo ni servicios Android.
 
 
 ---

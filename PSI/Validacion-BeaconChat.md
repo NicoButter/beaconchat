@@ -1,9 +1,122 @@
 # 06 · Validación y criterios de aceptación
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 18/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 20/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
 
-## Implementación #5 · SOS offline y laboratorio GNSS · 18/10/2026
+## Implementación #6 · Gateway experimental HTTPS · 20/10/2026
+
+**Resultado: 225 tests JVM aprobados (183 de la base + 42 nuevos), 0 fallos, 0 errores, 0 omitidos y APK debug compilada.** Una topología A→B→C con GATT falso entrega SOS sintéticos al gateway C, que deduplica por incidente y obtiene de una API falsa un comprobante con el UUID original y persistencia explícita de laboratorio. También observa unicast dirigido a otro NodeId sin generar `LOCAL_RECEIVED` en C. **No se ejecutaron BLE/GNSS/HTTPS físicos, handshake TLS real ni servidor Django. Ningún resultado confirma rescate.**
+
+### Revisión inicial, alcance y archivos
+
+`main`, HEAD **`1ad627541911a647d35b9deb5188c8bcb017adad`**, inicialmente limpio. No se crean ramas/worktrees ni se hace commit/push. Se preservan logos, chat legado, codec BLE, MeshEngine y SosMeshPolicy. Sin nuevas dependencias. La documentación modificada se limita al README bilingüe y documentos existentes en PSI. Los informes #5 y anteriores, debajo, son históricos.
+
+La primera ejecución falló con Java 25 (`25.0.4.1`). `/usr/lib/jvm/java-21-openjdk` no contiene un JDK utilizable; se encontró JDK 21 en la caché existente de Gradle. El sandbox no permite escribir en esa caché: se autorizó la ejecución exterior. Antes de editar, se completó **`testDebugUnitTest assembleDebug --rerun-tasks`**, 44 tareas ejecutadas, 183 tests aprobados y APK recompilada. Para la validación final se usó:
+
+```bash
+JAVA_HOME=/home/lordcommander/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew testDebugUnitTest assembleDebug
+git diff --check
+```
+
+| Archivos nuevos / modificados | Responsabilidad |
+| --- | --- |
+| [SosInternetGateway.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/gateway/SosInternetGateway.kt) | Dominio JVM, admisión, dedupe UUID/huella, cola volátil, estados, cuotas, expiración, rate limit y reintentos |
+| [LabApiContract.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/gateway/LabApiContract.kt) | Endpoint HTTPS validado, proyección de campos permitidos, interfaz HTTP inyectable, cliente y validador JSON V1 independiente de Android |
+| [HttpsLabHttpTransport.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/gateway/HttpsLabHttpTransport.kt) | HttpsURLConnection compatible con Android, TLS normal, sin redirecciones, límites de respuesta y revocación por activación |
+| [AndroidSosInternetGateway.kt](../app/src/main/java/com/nicobutter/beaconchat/sos/gateway/AndroidSosInternetGateway.kt) | Host main/IO, comprobación de Internet validado, publicación de estados y cancelación fuera de main |
+| [MeshBleNode.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/MeshBleNode.kt) | Callback `acceptedInbound` únicamente después de `MeshEngine.receive == ACCEPTED`, independiente del destinatario lógico y del historial |
+| [AndroidMeshTransport.kt](../app/src/main/java/com/nicobutter/beaconchat/mesh/ble/AndroidMeshTransport.kt) | Conecta el callback al gateway, usa el ticker de primer plano y lo desactiva al apagar mesh/pausar/salir |
+| [SosInternetGatewayDialog.kt](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/SosInternetGatewayDialog.kt), [MeshScreen.kt](../app/src/main/java/com/nicobutter/beaconchat/ui/screens/MeshScreen.kt) | URL de ensayo, activación explícita, cola/estados/comprobantes y aviso de laboratorio; sin cambiar laboratorio GNSS |
+| [AndroidManifest.xml](../app/src/main/AndroidManifest.xml) | INTERNET para HTTPS y ACCESS_NETWORK_STATE para comprobar capacidades; no ubicación de fondo |
+| [Tests de gateway](../app/src/test/java/com/nicobutter/beaconchat/sos/gateway/), [MeshBleAdapterTest.kt](../app/src/test/java/com/nicobutter/beaconchat/mesh/ble/MeshBleAdapterTest.kt) | 42 tests nuevos; helper GATT existente admite el mismo callback de producción |
+| [README](../README.md), [Arquitectura](Diseño-Arquitectura-BeaconChat.md), [ERS](ERS-BeaconChat.md), [Roadmap](Roadmap-BeaconChat.md), [Trazabilidad](Trazabilidad-BeaconChat.md), este informe | Estado, contrato, evidencia, limitaciones y próximos pasos |
+
+### Flujo y límites del gateway
+
+Reensamblado → codec mesh → política SOS existente → **MeshEngine.receive** → callback solo para ACCEPTED → decode SOS/política de nuevo → dedupe por `incidentId` → cola → proyección HTTP → envío IO → validación de respuesta. Mensajes duplicados/rechazados por mesh no invocan el callback; tampoco se importan mensajes de `events` ni de `LOCAL_RECEIVED`. El callback observa tránsito unicast incluso cuando `deliverLocally=false`. Sus fallos se aíslan para conservar relay/recibos GATT. La originación local no pasa por ese callback: se prueba con SOS recibidos de otro nodo.
+
+La huella SHA-256 cubre el SOS canónico completo, incluida la nota. Mismo UUID/cuerpo equivalente es DUPLICATE; mismo UUID con cualquier campo distinto es CONFLICT y conserva el original. La nota se usa transitoriamente para validar/calcular huella, pero no se conserva en la cola HTTP ni se envía. Solo se guarda la proyección permitida, huella, UUID y estado; ni NodeId ni MAC ni callsign. No se registran cuerpos, URL con secretos, credenciales ni excepciones de red en logs.
+
+| Límite predeterminado | Política |
+| --- | --- |
+| 16 pendientes, incluido activo y reintentos | Cola llena rechaza el nuevo y conserva tombstone; no expulsa pendientes |
+| 64 incidentes/huellas, incluidos confirmados/rechazados | Memoria llena rechaza UUID nuevo; no expulsa una deduplicación vigente |
+| 32 eventos | Solo UUID/estado; se sobrescribe el más antiguo, sin payload |
+| Pendiente 300.000 ms / dedupe 600.000 ms | Tiempo monotónico local desde primera recepción, sin refrescar por duplicados ni usar reloj remoto; limpieza al operar y en ticker foreground |
+| Un intento activo, inicio cada ≥5.000 ms | Límite global entre incidentes y activaciones; sin ráfaga al volver Internet |
+| Hasta 3 intentos por incidente | Error/timeout/resultado ambiguo reintentan tras 5 s y 10 s, respetando intervalo global. Rechazo HTTP definitivo no reintenta |
+| Deadline lógico 20 s; connect/read 5 s | Deadline y resultados tardíos comprobados en dominio; cancelación/disconnect en IO |
+| Endpoint ≤2048 caracteres / respuesta ≤2048 bytes | Solo URL HTTPS con ruta exacta; cuerpo UTF-8 estricto y JSON acotado |
+
+**Toda la cola es volátil.** Al desactivar gateway/mesh, pausar o salir se descartan pendientes; el activo pasa a UNKNOWN porque podría haberse guardado. Se revoca el permiso de esa activación; una tarea demorada no reutiliza una activación posterior y una cancelación tardía solo afecta la conexión capturada. Huellas/estados terminales siguen retenidos temporalmente; no se permite reactivar para saltarse dedupe. Caducidad sin intento produce EXPIRED; después de iniciar HTTP produce UNKNOWN. Tras 10 min, reinicio o muerte del proceso puede volver a admitirse un UUID; la futura API deberá deduplicar de forma durable. No hay dedupe compartido entre gateways.
+
+DNS/escritura/disconnect dependen del sistema; 20 s es un **deadline lógico**, no una garantía de interrupción física. El host conserva un solo worker HTTP hasta que termine, más como máximo un worker de cancelación; no crea workers sin límite al vencer/togglear. Puede demorarse el avance de la cola si el stack no termina una llamada. No hay servicio de fondo ni WorkManager.
+
+### Contrato HTTP V1 para futura API Django/DRF
+
+**POST `/api/v1/lab/incidents`**, solo HTTPS configurado por el usuario. `Content-Type: application/json; charset=utf-8`, `Accept: application/json`, **`Idempotency-Key: <incidentId>`**. Sin autenticación implementada ni credenciales incorporadas. No acepta userinfo, query, fragmento, otra ruta, HTTP ni redirecciones. Body con solo UUID, tipo/gravedad declarados, creación y posición sintética opcional:
+
+```json
+{
+  "incidentId": "00010203-0405-0607-0809-0a0b0c0d0e0f",
+  "type": "MEDICAL",
+  "severity": "HIGH",
+  "createdAtEpochMillis": 1,
+  "position": {"latitude": 12.3456, "longitude": -45.6789}
+}
+```
+
+`type`: MEDICAL/FIRE/TRAPPED/OTHER; `severity`: LOW/MODERATE/HIGH/CRITICAL. Creación epoch ms no negativa y declarada por el origen. Sin posición, **se omite `position`**. No se envían nota, fuente GNSS, precisión/edad del fix real ni información de identidad del teléfono. La única posición admitida es la fixture ya permitida por SosMeshPolicy. No convierte GNSS real a sintético ni redondea una ubicación privada. Cambios en nota también se rechazan localmente como conflicto aunque no se proyecten a HTTP.
+
+Respuesta **200 (ya existente equivalente) o 201 (nuevo)**, Content-Type application/json, opcional `charset=utf-8`:
+
+```json
+{
+  "version": "1",
+  "incidentId": "00010203-0405-0607-0809-0a0b0c0d0e0f",
+  "receipt": "lab_example_1",
+  "persistedInLaboratory": true
+}
+```
+
+Las cuatro propiedades son obligatorias y únicas; no se aceptan otras. `version` es **string "1"**, UUID canónico minúsculo exactamente correlacionado, `receipt` debe cumplir **`lab_[A-Za-z0-9_-]{1,96}`**, y persistencia es booleano true. Parser limitado a objeto plano con strings/booleanos, escapes JSON y espacios válidos; rechaza duplicados, anidados, tipos erróneos, sobrantes y UTF-8 inválido. `200/201` aislado, HTML, cuerpo vacío, comprobante inválido o UUID diferente dan **UNKNOWN**, nunca confirmación.
+
+La futura API debe validar whitelist sintética, hacer UNIQUE por UUID y transacción antes de devolver comprobante. Misma clave y body equivalente devuelve el mismo resultado (200); diferente body con la misma clave debe dar 409 sin sobrescribir. UUID de header y body deben coincidir. Hace falta implementar y ensayar esas garantías en Django/DRF: el servidor falso solo modela idempotencia en memoria. Cliente: 4xx excepto 408/429 → REJECTED terminal; 408/429, 3xx, 202/204 y 5xx → UNKNOWN reintentable; SocketTimeoutException → TIMEOUT; fallo TLS → ERROR; IOException sin respuesta → UNKNOWN. Nunca se consume un error/redirect como comprobante.
+
+### Estados, conectividad y seguridad
+
+`RECEIVED` (evento independiente), `QUEUED`, `HTTP_STARTED`, `LAB_CONFIRMED`, `ERROR`, `REJECTED`, `TIMEOUT`, `UNKNOWN`, `EXPIRED`, `CANCELLED`. La UI muestra estado, intentos, permanencia en cola, UUID y comprobante solo tras validarlo. **LAB_CONFIRMED significa que la API configurada declara persistencia de laboratorio; no certifica un guardado independiente, atención, lectura, despacho ni rescate.** No hay retorno del comprobante al emisor BLE; este conserva destino sin confirmar. GATT ACK, cola y TLS conectado no producen LAB_CONFIRMED.
+
+Android verifica INTERNET + VALIDATED y ausencia de CAPTIVE_PORTAL sobre la red predeterminada antes de iniciar cada intento; no consulta simplemente si es Wi-Fi. Esta capacidad es una comprobación del sistema y no garantiza que la API sea alcanzable ([documentación Android](https://developer.android.com/develop/connectivity/network-ops/reading-network-state)). La UI muestra la última comprobación. INTERNET y ACCESS_NETWORK_STATE se usan efectivamente. TLS usa trust store y verificador de hostname normales de [HttpsURLConnection](https://developer.android.com/reference/javax/net/ssl/HttpsURLConnection); no hay trust-all, certificados aceptados a mano ni redirección a otro destino.
+
+Sigue bloqueado todo SOS no laboratorio, GNSS/mock y coordenada arbitraria marcada sintética. BLE continúa sin autenticación/cifrado; declaraciones remotas y comprobantes no tienen firma de aplicación. No hay cuentas, autorización de gateways, antiabuso de servidor, almacenamiento durable ni garantía entre varios gateways. El endpoint debe ser un laboratorio propio autorizado; no se prueba contra servicios oficiales. El cliente no envía datos personales del payload; el servidor de ensayo igualmente puede observar metadatos de conexión IP/TLS. No se habilitan SOS reales.
+
+### Evidencia automatizada final
+
+`BUILD SUCCESSFUL`, 44 tareas (8 ejecutadas y 36 actualizadas). Se mantienen warnings previos de BuildConfig y Java 8; no se ejecutó Lint ni instrumentación Android.
+
+| Suite | Nuevos tests | Cobertura |
+| --- | ---: | --- |
+| SosInternetGatewayTest | 18 | Deshabilitado, transiciones, UUID equivalente/conflicto, notas omitidas, cola/memoria/retención, offline/reconexión, rate/single flight, respuesta perdida tras guardar, mismo UUID/body, backoff/3 intentos, timeout/deadline, expiración con resultado incierto, desactivación y callbacks viejos, GNSS/mock/posición arbitraria bloqueados |
+| LabApiContractTest | 8 | 200/201 y recibo válido; HTTP sin evidencia; UUID distinto/no canónico; JSON duplicado/anidado/sobrante/tipos; escapes; MIME/UTF-8/tamaño; campos permitidos y HTTPS obligatorio |
+| InternetGatewayMeshTest | 9 | A→B→C destino y tránsito, sin A↔C; diamante/doble ruta y fragmentos duplicados; retry con nuevo messageId; conflicto UUID; gateway deshabilitado sin importar historial; privacidad/malformados; rechazo/dedupe motor; chat legacy y aislamiento de fallo del observador |
+| HttpsLabHttpTransportTest | 7 | Conexión HTTPS falsa inyectada: desactivado sin abrir; POST/header/UUID/cuerpo/timeouts/TLS sin overrides; redirect; cuerpo excesivo/UTF-8; timeout/cierre; consentimiento de activación vieja; revocación sin IO y cancelación capturada |
+| Base previa reejecutada | 183 | Chat, motor, codec, transporte/GATT, SOS y política GNSS anteriores |
+| **Total** | **225** | **0 fallos, 0 errores, 0 omitidos** |
+
+API/GATT/HTTPS son falsos en estos tests; no se abrió un puerto ni se contactó un servidor. No se verificó handshake TLS real ni se ejecutó ConnectivityManager/Compose/LocationManager en Android: su integración se verificó por compilación. ADB exterior: **`List of devices attached` vacío**. El primer intento ADB dentro del sandbox no pudo abrir sockets; se repitió autorizado afuera. No se instaló APK.
+
+Evidencia local no versionada: `app/build/reports/tests/testDebugUnitTest/index.html`, XML `app/build/test-results/testDebugUnitTest/TEST-*.xml`, APK `app/build/outputs/apk/debug/app-debug.apk`: **12.349.576 bytes**, SHA-256 **`47c816ea7a8fcd99d35b201a6f5ef390dba9f597888ced52bd2f5994ddc69a57`**. Suite final gateway: **20/10/2026 10:50:42 UTC−03:00** (`2026-10-20T13:50:42Z`). `git diff --check` correcto.
+
+### Pendiente: teléfonos y futuro servidor
+
+1. Implementar API de ensayo Django/DRF con UUID único, comparación de contenido, transacción y comprobante estable; probar respuestas perdidas después de persistir y UUID conflictivos. Añadir autenticación/roles y cuotas antes de cualquier escenario más amplio. No habilitar información sensible.
+2. Instalar misma APK en tres teléfonos por serial explícito. A/B sin salida IP, C único gateway; aislar A↔C, activar mesh y configurar en C exclusivamente una API HTTPS propia con certificado válido. Originar desde A un ensayo del laboratorio SOS con posición ficticia o ausente; correlacionar UUID/comprobante en C y persistencia real en el servidor. Verificar que A sigue sin confirmar rescate. Ensayar también D como destino lógico ausente y C como tránsito.
+3. Probar Wi-Fi sin Internet/captive portal, pérdida de DNS/API, rechazo, timeout, TLS inválido, HTTP y redirect. Afirmar UNKNOWN si una respuesta perdida pudo ocultar un guardado. Recuperar conectividad y confirmar mismo UUID en todos los intentos.
+4. Pausar/salir/desactivar durante cola y durante POST, reactivar antes de que termine el anterior; verificar salida revocada, cero workers crecientes y ausencia de callbacks que confirmen otra activación. Ensayar saturación, expiración y reinicio: pérdida de cola esperada, dedupe durable pendiente del servidor.
+5. Repetir chat directo y laboratorio GNSS existente con/sin gateway; GPS/BLE físicos siguen pendientes. No compartir capturas/logs con notas o coordenadas reales, ni conectar a servicios oficiales. Mapas, cuentas, centro, LoRa y DTN quedan fuera.
+
+## Histórico: implementación #5 · SOS offline y laboratorio GNSS · 18/10/2026
 
 **Resultado: 183 tests JVM aprobados (144 de la base + 39 nuevos), 0 fallos, 0 errores, 0 omitidos y APK debug compilada con Gradle 8.13/JDK 21.** Se construye, serializa, fragmenta, reensambla e interpreta un SOS válido sintético o sin posición, incluido A→B→C con el adaptador y GATT falso. **No se obtuvieron coordenadas satelitales ni se probó BLE físico.** ADB devolvió una lista vacía al iniciar y terminar.
 

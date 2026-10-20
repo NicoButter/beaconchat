@@ -20,7 +20,8 @@ data class MeshBleSnapshot(val nodeId: NodeId?, val enabled: Boolean = false, va
  */
 class MeshBleNode(val nodeId: NodeId, private val clock: MeshClock, port: MeshGattPort,
     private val changed: (MeshBleSnapshot) -> Unit = {},
-    private val closeIncomingLink: (MeshLinkSession) -> Unit = {}) {
+    private val closeIncomingLink: (MeshLinkSession) -> Unit = {},
+    private val acceptedInbound: (MeshMessage) -> Unit = {}) {
     private val engine = MeshEngine(nodeId, clock)
     private val reassembler = MeshReassembler(clock)
     private val neighbors = linkedMapOf<String, MeshNeighbor>()
@@ -131,6 +132,13 @@ class MeshBleNode(val nodeId: NodeId, private val clock: MeshClock, port: MeshGa
                 publish(); return false
             }
             val decision = engine.receive(message, previousHop)
+            if (decision.acceptance == Acceptance.ACCEPTED) {
+                // Independent of logical destination, visual history and LOCAL_RECEIVED events.
+                // An optional observer must not interrupt normal mesh forwarding or link receipts.
+                try { acceptedInbound(message) } catch (_: Exception) {
+                    event(MeshActivityKind.FAILURE, "Observador de recepción no disponible")
+                }
+            }
             if (decision.deliverLocally) event(MeshActivityKind.LOCAL_RECEIVED, "Recibido localmente; no confirma otros destinos", message)
             if (decision.acceptance == Acceptance.ACCEPTED) recordForwarding(decision)
             else if (decision.acceptance !in listOf(Acceptance.DUPLICATE, Acceptance.OWN_ORIGIN)) {

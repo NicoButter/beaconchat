@@ -1,9 +1,9 @@
 # 02 · Requerimientos
 
-> **Documento vigente (2026).** SOS local/GPS y adaptador mesh Android implementados en código; transporte SOS sintético/sin posición probado en JVM. **Captura satelital y BLE multisalto físicos pendientes.** GNSS real bloqueado en mesh; gateway, backend, mapas y centro no implementados. Los documentos de 2025 se conservan en el historial Git.
+> **Documento vigente (2026).** SOS local/GPS y adaptador mesh Android implementados en código; transporte SOS sintético/sin posición probado en JVM. **Captura satelital y BLE multisalto físicos pendientes.** GNSS real bloqueado en mesh y gateway; gateway HTTPS sintético implementado y probado con API falsa, sin backend, mapas ni centro reales. Los documentos de 2025 se conservan en el historial Git.
 
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 18/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 20/10/2026**
 [Índice](../README.md) · [Casos de uso](Casos-de-Uso-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
 
 ## Convenciones y alcance de aceptación
@@ -20,6 +20,14 @@ GPS se solicita explícitamente en primer plano con `GPS_PROVIDER`, permiso prec
 
 **Solo se admite en mesh SOS de laboratorio con posición sintética fija o ausente.** Origen y recepción rechazan SOS estructurados con GNSS/mock reales, posición sintética arbitraria o formato inválido antes de registrar/reenviar contenido. El ensayo no copia coordenadas ni nota local. No hay autenticación/cifrado; la marca sintética no acredita seguridad. UI con estados local/cola/enlace/destino sin confirmar. [Contrato y evidencia](Validacion-BeaconChat.md).
 
+### Perfil gateway HTTPS · implementación #6
+
+Gateway desactivado por defecto, sin URL ni credenciales preconfiguradas. Activación explícita en Mesh Radar y HTTPS obligatorio con TLS normal; no redirecciones ni credenciales en URL. Observa mensajes entrantes ACCEPTED de MeshEngine incluso en tránsito; nunca importa historial ni entrega duplicados/rechazados. Dedupe por UUID/huella de todo el SOS; conflictos conservan original. Mantiene bloqueo GNSS real y elimina notas/identidades del payload HTTP.
+
+Cola volátil de 16 pendientes, 64 incidentes retenidos, 32 eventos; 5 min de espera y 10 min de dedupe monotónico; un intento activo cada ≥5 s, máximo 3 intentos, espera 5/10 s, deadline lógico 20 s y connect/read 5 s. Sin Internet validado se espera sin HTTP; pausa/salida desactiva y descarta pendientes. No hay recuperación durable. Respuesta ambigua/timeout no confirma persistencia. Solo 200/201 + JSON V1 con UUID correlacionado/comprobante válido/`persistedInLaboratory: true` produce LAB_CONFIRMED; nunca confirma rescate ni retorna al origen BLE.
+
+Contrato `POST /api/v1/lab/incidents` preparado para Django/DRF, proyecta UUID, tipo/gravedad, creación y posición ficticia opcional. **225 tests JVM aprobados, 42 nuevos**, con GATT/API/HTTPS falsos. Teléfonos, TLS real, autenticación e idempotencia/persistencia de backend siguen pendientes. [Especificación exacta y evidencia](Validacion-BeaconChat.md).
+
 ## Requerimientos de usuario (RU)
 
 | ID | Necesidad y resultado esperado | Prioridad | Estado |
@@ -27,7 +35,7 @@ GPS se solicita explícitamente en primer plano con `GPS_PROVIDER`, permiso prec
 | R26-RU-01 | Como persona afectada, quiero registrar SOS y comunicar ubicación con su calidad, o su ausencia, para que el centro interprete la solicitud. | P0 | E local / S ensayo sintético; centro y tránsito GNSS real P |
 | R26-RU-02 | Como colaborador, quiero retransmitir solicitudes por vecinos sin necesitar Internet en cada teléfono. | P0 | E Android / S topologías; hardware pendiente |
 | R26-RU-03 | Como emisor, quiero distinguir envío local, tránsito y recepción central para saber qué está confirmado. | P0 | E estados locales; confirmación central P |
-| R26-RU-04 | Como usuario de gateway, quiero remitir solicitudes al centro cuando disponga de Internet y reconocer fallos de salida. | P0 | P |
+| R26-RU-04 | Como usuario de gateway, quiero remitir solicitudes al centro cuando disponga de Internet y reconocer fallos de salida. | P0 | E/S gateway sintético; centro real P |
 | R26-RU-05 | Como operador autorizado, quiero visualizar y clasificar incidentes con ubicación/calidad y sin duplicados. | P0 | P |
 | R26-RU-06 | Como emisor o colaborador, quiero conservar temporalmente solicitudes durante cortes y recuperarlas al volver el enlace. | P1 | P; no provisto por la cola actual |
 | R26-RU-07 | Como participante, quiero decidir el uso de mis datos y que solo los destinatarios autorizados accedan a coordenadas y notas. | P0 | P |
@@ -45,16 +53,16 @@ GPS se solicita explícitamente en primer plano con `GPS_PROVIDER`, permiso prec
 | R26-RF-05 | Intentar fix GNSS local con permiso informado y espera acotada, sin exigir red de datos. Registrar precisión estimada, instante monotónico de captura y edad; nunca convertir ausencia en `(0,0)`. | P0 | E GPS_PROVIDER; S política temporal; físico pendiente / E3 parcial |
 | R26-RF-06 | Si falta fix/permiso, permitir posición conocida con edad/precisión explícita o SOS sin ubicación. No bloquear por falta de posición ni rotularla exacta. Referencia manual identificada queda propuesta. | P0 | E/S conocido/ausente; manual P / E3 parcial |
 | R26-RF-07 | Integrar el núcleo al transporte BLE mediante formato versionado, identidad lógica, fragmentación/reensamblado acotado y reenvío A→B→C. Excluir salto anterior y descontar TTL una vez por transmisión lógica; conservar chat legado. | P0 | E Android / S GATT falso; físico pendiente / E2 parcial |
-| R26-RF-08 | Exponer estados local, pendiente de tránsito, fallo/expiración y recepción central según evidencia. Solo una respuesta central válida produce «recibido por el centro»; un ACK GATT o handoff no lo hace. Sin retorno mesh de la confirmación, el origen debe seguir sin confirmar. | P0 | E estados locales/cola/enlace; central P / E3 parcial |
-| R26-RF-09 | Habilitar rol gateway dinámico: verificar acceso al servicio por HTTPS, autenticarse y remitir el mismo SOS. Pérdida de red o respuesta ambigua no confirma entrega; reintentos y custodia durable dependen de R26-RF-12. | P0 | P / E3 |
-| R26-RF-10 | Recibir en API, autenticar gateway y validar el SOS; deduplicar por identidad estable, guardar antes de confirmar y devolver comprobante correlacionado. Dos gateways con la misma solicitud generan un incidente, no dos. | P0 | P / E3 |
+| R26-RF-08 | Exponer estados local, pendiente de tránsito, fallo/expiración y recepción central según evidencia. Solo una respuesta central válida produce «recibido por el centro»; un ACK GATT o handoff no lo hace. Sin retorno mesh de la confirmación, el origen debe seguir sin confirmar. | P0 | E estados locales y gateway; S comprobante de API falsa, sin retorno al origen; central real P / E3 parcial |
+| R26-RF-09 | Habilitar rol gateway dinámico: verificar acceso al servicio por HTTPS, autenticarse y remitir el mismo SOS. Pérdida de red o respuesta ambigua no confirma entrega; custodia durable depende de R26-RF-12. | P0 | E/S gateway sintético, cola/reintentos volátiles; autenticación/API real P / E3 parcial |
+| R26-RF-10 | Recibir en API, autenticar gateway y validar el SOS; deduplicar por identidad estable, guardar antes de confirmar y devolver comprobante correlacionado. Dos gateways con la misma solicitud generan un incidente, no dos. | P0 | E/S contrato y API falsa; backend/persistencia/autenticación real P / E3 parcial |
 | R26-RF-11 | Permitir a operador autenticado ver mapa/lista, filtros por gravedad declarada/estado/tiempo y clasificar manualmente. Mostrar incertidumbre y ubicación no disponible sin inventar marcadores. Registrar cambios auditables. | P0 | P / E3 |
 | R26-RF-12 | Implementar custodia durable con expiración, cuotas, reintentos espaciados y recuperación tras reinicio. Conservar ID y carga inmutable, limitar intentos y no restaurar TTL indefinidamente; eliminar conforme a retención acordada. | P1 | P / E4 |
 | R26-RF-13 | Gestionar permisos/participación informada, identidades y autenticación de emisores/gateways, protección del contenido hasta el centro, roles, antiabuso, auditoría mínima y borrado/retención. Rechazar acceso indebido y evitar exposición pública de coordenadas. | P0 | E permisos/bloqueo GNSS real; criptografía y seguridad integral P / E3–E5 |
 | R26-RF-14 | Incorporar brigadistas, disponibilidad/asignación de recursos, reportes de rutas bloqueadas y prioridad asistida bajo decisión humana. Identificar fuente/edad de cada reporte; no declarar una ruta segura automáticamente. | P2 | P / E4–E5 |
 | R26-RF-15 | Evaluar transporte complementario LoRa mediante dispositivo/gateway externo compatible. Si se incorpora, preservar identidad/dedupe y no condicionar la cadena mínima BLE + Internet a disponer de LoRa. | P2 | P / E5 opcional |
 
-Los RF-01/02 no satisfacen el sistema integral. RF-04/05/06/07/08 tienen el alcance parcial indicado; gateway, centro, custodia y seguridad integral siguen pendientes. El adaptador fragmenta contenido de hasta 1024 bytes sin modificar el chat RF-01. [Presupuesto y límites](Diseño-Arquitectura-BeaconChat.md).
+Los RF-01/02 no satisfacen el sistema integral. RF-04/05/06/07/08/09/10 tienen el alcance parcial indicado; gateway sintético existe, centro/backend real, custodia durable y seguridad integral siguen pendientes. El adaptador fragmenta contenido de hasta 1024 bytes sin modificar el chat RF-01. [Presupuesto y límites](Diseño-Arquitectura-BeaconChat.md).
 
 ## Requerimientos no funcionales (RNF)
 
@@ -83,7 +91,7 @@ Todos los RNF siguientes son **P** como requisitos del sistema integral; algunos
 | R26-RS-04 | Serializer, versiones y fragmentos acotados; validar integridad y mensaje completo antes del núcleo. SOS V1 se transporta como contenido sin cambiar el wire protocol mesh; criptografía consumirá presupuesto adicional. | P0 | E/S codec/mesh/SOS; protección P |
 | R26-RS-05 | Diseñar ejecución y recuperación conforme al ciclo de vida Android, permisos y restricciones energéticas de las versiones ensayadas. Hoy la app detiene recursos al pausar: continuidad con pantalla bloqueada o background requiere trabajo y pruebas independientes. | P0 | P continuidad; E detención |
 | R26-RS-06 | Centro futuro con API autenticada, almacenamiento durable/idempotente, control de acceso, auditoría y cartografía con licencia/fuente verificadas. Empezar con servicio de laboratorio, datos ficticios y operador de prueba. | P0 | P |
-| R26-RS-07 | Solo el gateway requiere conectividad IP hacia la API y configuración HTTPS/credenciales; red Wi-Fi asociada no prueba Internet útil. El manifiesto actual no declara INTERNET; permisos y cliente de red se implementarán después. | P0 | P |
+| R26-RS-07 | Solo el gateway requiere conectividad IP hacia la API y configuración HTTPS/credenciales; red Wi-Fi asociada no prueba Internet útil. El manifiesto declara INTERNET y ACCESS_NETWORK_STATE; cliente opt-in con red validada y TLS normal. Credenciales/autenticación y API real pendientes. | P0 | E/S laboratorio; físico P |
 | R26-RS-08 | LoRa requiere equipo físico externo, alimentación, enlace con el teléfono, plan de radio y revisión de condiciones locales antes de un ensayo. No se presume radio LoRa en un Android común. | P2 | P |
 | R26-RS-09 | El host/adaptador debe serializar llamadas a MeshEngine, proveer reloj monotónico e identidad lógica estable y definir handoff asíncrono con backpressure. Callsign o MAC no son credenciales ni identidad estable garantizada. | P0 | S contrato del núcleo; P host BLE |
 

@@ -83,6 +83,8 @@ fun MeshScreen(
     val experimentalState by meshController.experimentalMesh.state.collectAsState()
     var showExperimental by remember { mutableStateOf(false) }
     var showSos by remember { mutableStateOf(false) }
+    var showGateway by remember { mutableStateOf(false) }
+    val gatewayState by meshController.experimentalMesh.internetGateway.state.collectAsState()
 
     val callsign by userPreferences.callsign.collectAsState(initial = "UNKNOWN")
 
@@ -336,6 +338,9 @@ fun MeshScreen(
                 OutlinedButton(onClick = { showSos = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("Laboratorio SOS offline")
                 }
+                OutlinedButton(onClick = { showGateway = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Gateway HTTPS: ${if (gatewayState.enabled) "activo" else "inactivo"} · ${gatewayState.queued} pendientes")
+                }
                 Spacer(modifier = Modifier.height(16.dp))
 
                 if (lastError != null) {
@@ -420,6 +425,11 @@ fun MeshScreen(
     }
     if (showSos) {
         SosLaboratoryDialog(experimentalState, meshController.experimentalMesh::submitSosLaboratory) { showSos = false }
+    }
+    if (showGateway) {
+        SosInternetGatewayDialog(gatewayState, experimentalState.enabled && resumed,
+            meshController.experimentalMesh::enableInternetGateway,
+            meshController.experimentalMesh.internetGateway::disable) { showGateway = false }
     }
 }
 
