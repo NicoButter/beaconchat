@@ -29,7 +29,7 @@ data class MeshLinkResult(val job: MeshGattJob, val outcome: MeshLinkOutcome, va
  * before advancing, so a late/duplicated callback cannot silently skip a fragment.
  */
 class MeshGattClient(private val local: NodeId, private val clock: MeshClock, private val port: MeshGattPort,
-    private val finished: (MeshLinkResult) -> Unit) {
+    private val finished: (MeshLinkResult) -> Unit, private val diagnostics: MeshDiagnostics = MeshDiagnostics.NONE) {
     enum class Phase { IDLE, CONNECTING, DISCOVERING, READING_IDENTITY, WRITING_IDENTITY, WRITING_FRAME, READING_RECEIPT }
     var phase = Phase.IDLE; private set
     var job: MeshGattJob? = null; private set
@@ -39,6 +39,7 @@ class MeshGattClient(private val local: NodeId, private val clock: MeshClock, pr
     private var startedAt = 0L
     private var operationAt = 0L
     private var transferAt: Long? = null
+    private var transferLimit = MeshBleTiming.LEGACY_TRANSFER_MILLIS
     val busy get() = job != null
 
     fun start(next: MeshGattJob) {
@@ -46,6 +47,7 @@ class MeshGattClient(private val local: NodeId, private val clock: MeshClock, pr
         job = next
         remote = null
         frames = next.encoded?.let { MeshFragmentProtocol.fragment(it, next.transferId) } ?: emptyList()
+        transferLimit = if (frames.isEmpty()) MeshBleTiming.LEGACY_TRANSFER_MILLIS else MeshBleTiming.transferMillis(frames.size)
         index = 0
         startedAt = clock.nowMillis()
         transferAt = null
@@ -54,18 +56,21 @@ class MeshGattClient(private val local: NodeId, private val clock: MeshClock, pr
 
     fun connected(token: Long, success: Boolean) {
         if (!matches(token, Phase.CONNECTING)) return
+        measured(success)
         if (!success) fail("Conexión mesh fallida")
         else issue(Phase.DISCOVERING, MeshGattCommand.Discover(token))
     }
 
     fun services(token: Long, supported: Boolean) {
         if (!matches(token, Phase.DISCOVERING)) return
+        measured(supported)
         if (!supported) fail("Vecino sin características/capacidades mesh")
         else issue(Phase.READING_IDENTITY, MeshGattCommand.ReadIdentity(token))
     }
 
     fun identityRead(token: Long, value: ByteArray, success: Boolean) {
         if (!matches(token, Phase.READING_IDENTITY)) return
+        measured(success)
         if (!success) { fail("No se pudo leer identidad mesh"); return }
         val declared = try { MeshLinkProtocol.identity(value) } catch (e: IllegalArgumentException) {
             fail(e.message ?: "Identidad mesh inválida"); return
@@ -74,11 +79,13 @@ class MeshGattClient(private val local: NodeId, private val clock: MeshClock, pr
             fail("Identidad mesh propia o cambiada durante la sesión"); return
         }
         remote = declared
+        diagnostics.emit(MeshDiagnostic("identity_verified", token, nodeId = declared, peer = job!!.address))
         issue(Phase.WRITING_IDENTITY, MeshGattCommand.WriteIdentity(token, MeshLinkProtocol.hello(local)))
     }
 
     fun identityWritten(token: Long, success: Boolean) {
         if (!matches(token, Phase.WRITING_IDENTITY)) return
+        measured(success)
         if (!success) fail("El vecino rechazó nuestra identidad mesh")
         else if (frames.isEmpty()) finish(MeshLinkOutcome.PROBED, "Capacidad mesh verificada; identidad declarada sin autenticar")
         else { transferAt = clock.nowMillis(); writeFrame() }
@@ -86,15 +93,20 @@ class MeshGattClient(private val local: NodeId, private val clock: MeshClock, pr
 
     fun frameWritten(token: Long, success: Boolean) {
         if (!matches(token, Phase.WRITING_FRAME)) return
+        measured(success)
         if (!success) fail("Escritura de fragmento mesh fallida; destino sin confirmar")
         else issue(Phase.READING_RECEIPT, MeshGattCommand.ReadReceipt(token))
     }
 
     fun receiptRead(token: Long, value: ByteArray, success: Boolean) {
         if (!matches(token, Phase.READING_RECEIPT)) return
-        if (!success) { fail("No se pudo verificar admisión del fragmento"); return }
+        if (!success) { measured(false); fail("No se pudo verificar admisión del fragmento"); return }
         // Old reads are ignored; only the receipt for the current frame can advance this transfer.
-        if (!value.contentEquals(MeshLinkProtocol.receipt(frames[index]))) return
+        if (!value.contentEquals(MeshLinkProtocol.receipt(frames[index]))) {
+            diagnostics.emit(MeshDiagnostic("receipt_ignored", token, frameIndex = index, status = "MISMATCH"))
+            return
+        }
+        measured(true)
         index++
         if (index == frames.size) finish(MeshLinkOutcome.LINK_WRITTEN, "Escrito en el enlace; destino final sin confirmar")
         else writeFrame()
@@ -102,14 +114,35 @@ class MeshGattClient(private val local: NodeId, private val clock: MeshClock, pr
 
     fun disconnected(token: Long) { if (job?.token == token) fail("Enlace mesh desconectado; destino sin confirmar") }
     fun cancel() { if (busy) finish(MeshLinkOutcome.CANCELLED, "Mesh cancelado; destino sin confirmar") }
-    fun tick() {
-        if (!busy) return
+    fun tick() { checkDeadline() }
+
+    private fun checkDeadline(): Boolean {
+        if (!busy) return false
         val now = clock.nowMillis()
-        if (now - startedAt >= 30_000 || now - operationAt >= 5_000 ||
-            transferAt?.let { now - it >= 14_000 } == true) fail("Timeout mesh; destino sin confirmar")
+        val expired = when {
+            now - startedAt >= MeshBleTiming.JOB_MILLIS -> "JOB"
+            now - operationAt >= MeshBleTiming.OPERATION_MILLIS -> "OPERATION"
+            transferAt?.let { now - it >= transferLimit } == true -> "TRANSFER"
+            else -> null
+        }
+        if (expired != null) {
+            diagnostics.emit(MeshDiagnostic("gatt_timeout", job!!.token, phase.name,
+                elapsedMillis = now - startedAt, frameIndex = index, frameCount = frames.size, status = expired))
+            fail("Timeout mesh ($expired); destino sin confirmar")
+        }
+        return expired != null
     }
 
-    private fun matches(token: Long, expected: Phase) = job?.token == token && phase == expected
+    private fun matches(token: Long, expected: Phase): Boolean {
+        if (job?.token != token || phase != expected) return false
+        return !checkDeadline()
+    }
+    private fun measured(success: Boolean) {
+        diagnostics.emit(MeshDiagnostic("gatt_operation", job!!.token, phase.name,
+            durationMillis = clock.nowMillis() - operationAt, elapsedMillis = clock.nowMillis() - startedAt,
+            frameIndex = if (transferAt == null) null else index, frameCount = frames.size,
+            transferId = job!!.transferId, status = if (success) "SUCCESS" else "FAILED"))
+    }
     private fun writeFrame() = issue(Phase.WRITING_FRAME, MeshGattCommand.WriteFrame(job!!.token, frames[index].copyOf()))
     private fun issue(next: Phase, command: MeshGattCommand) {
         phase = next
@@ -121,6 +154,11 @@ class MeshGattClient(private val local: NodeId, private val clock: MeshClock, pr
     private fun finish(outcome: MeshLinkOutcome, detail: String) {
         val previous = job ?: return
         val identity = remote
+        diagnostics.emit(MeshDiagnostic("gatt_result", previous.token, phase.name,
+            durationMillis = transferAt?.let { clock.nowMillis() - it }, elapsedMillis = clock.nowMillis() - startedAt,
+            frameIndex = index, frameCount = frames.size, transferId = previous.transferId,
+            messageId = previous.message?.messageId, ttl = previous.message?.hopsRemaining,
+            peer = previous.address, nodeId = identity, status = outcome.name))
         job = null
         phase = Phase.IDLE
         frames = emptyList()

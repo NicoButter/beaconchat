@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import com.nicobutter.beaconchat.mesh.ble.AndroidMeshTransport
+import com.nicobutter.beaconchat.mesh.ble.MeshDebugLog
+import com.nicobutter.beaconchat.mesh.ble.MeshDiagnostic
+import com.nicobutter.beaconchat.mesh.ble.emit
 import com.nicobutter.beaconchat.mesh.transport.MeshGattContract
 
 /** Legacy direct chat plus opt-in experimental mesh. Hardware/session state is on the main looper. */
@@ -128,6 +131,7 @@ class BLEMeshController(context: Context) {
                 ?: throw IllegalStateException("Este dispositivo no permite publicidad BLE")
             advertisedCallsign = name
             _isStartingAdvertising.value = true
+            MeshDebugLog.emit(MeshDiagnostic("advertising", status = "STARTING"))
             val generation = ++advertisingGeneration
             val callback = object : AdvertiseCallback() {
                 override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) { handler.post {
@@ -135,10 +139,14 @@ class BLEMeshController(context: Context) {
                         advertisingTimeout?.let(handler::removeCallbacks)
                         _isStartingAdvertising.value = false
                         _isAdvertising.value = true
+                        MeshDebugLog.emit(MeshDiagnostic("advertising", status = "STARTED"))
                     }
                 } }
                 override fun onStartFailure(errorCode: Int) { handler.post {
-                    if (generation == advertisingGeneration) advertisingFailed("Publicidad BLE falló: $errorCode")
+                    if (generation == advertisingGeneration) {
+                        MeshDebugLog.emit(MeshDiagnostic("advertising", status = "FAILED_$errorCode"))
+                        advertisingFailed("Publicidad BLE falló: $errorCode")
+                    }
                 } }
             }
             advertisingCallback = callback
@@ -149,6 +157,8 @@ class BLEMeshController(context: Context) {
                 override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) { handler.post {
                     if (generation == advertisingGeneration && (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS)) {
                         experimentalMesh.serverDisconnected(device.address)
+                    } else if (generation == advertisingGeneration && newState == BluetoothProfile.STATE_CONNECTED) {
+                        experimentalMesh.serverConnected(device.address)
                     }
                 } }
                 override fun onServiceAdded(status: Int, service: BluetoothGattService?) { handler.post {
@@ -183,6 +193,9 @@ class BLEMeshController(context: Context) {
                                 else BluetoothGatt.GATT_FAILURE
                             } catch (_: Exception) { BluetoothGatt.GATT_FAILURE }
                         }
+                        MeshDebugLog.emit(MeshDiagnostic("server_operation",
+                            phase = if (characteristic.uuid == MeshGattContract.IDENTITY_UUID) "WRITE_IDENTITY" else "WRITE_FRAME",
+                            status = "GATT_$meshStatus"))
                         try { if (responseNeeded) server?.sendResponse(device, requestId, meshStatus, offset, null) }
                         catch (_: Exception) { _lastError.value = "No se pudo responder al canal mesh" }
                         return@post
@@ -226,6 +239,7 @@ class BLEMeshController(context: Context) {
                             if (response != null) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
                         } catch (_: Exception) { BluetoothGatt.GATT_FAILURE }
                     }
+                    MeshDebugLog.emit(MeshDiagnostic("server_operation", phase = "READ", status = "GATT_$status"))
                     try { server?.sendResponse(device, requestId, status, offset, response) }
                     catch (_: Exception) { _lastError.value = "No se pudo responder a lectura mesh" }
                 } }
@@ -268,6 +282,7 @@ class BLEMeshController(context: Context) {
         server = null
         _isAdvertising.value = false
         _isStartingAdvertising.value = false
+        MeshDebugLog.emit(MeshDiagnostic("advertising", status = "STOPPED"))
     }
 
     fun startScanning() {
@@ -286,6 +301,7 @@ class BLEMeshController(context: Context) {
                 override fun onScanResult(callbackType: Int, result: ScanResult) { handler.post {
                     if (scanningCallback !== this) return@post
                     _isScanning.value = true // Android provides no onScanStarted callback.
+                    if (_peers.value.isEmpty()) MeshDebugLog.emit(MeshDiagnostic("scan", status = "RESULT_RECEIVED"))
                     val bytes = result.scanRecord?.getServiceData(ParcelUuid(serviceUuid)) ?: return@post
                     val name = try { DirectBleProtocol.decodeCallsign(bytes) } catch (_: Exception) { return@post }
                     val peer = MeshPeer(result.device.address, "BeaconChat BLE", name, result.rssi, System.currentTimeMillis())
@@ -295,12 +311,14 @@ class BLEMeshController(context: Context) {
                 override fun onScanFailed(errorCode: Int) { handler.post {
                     if (scanningCallback === this) {
                         stopScanning()
+                        MeshDebugLog.emit(MeshDiagnostic("scan", status = "FAILED_$errorCode"))
                         _lastError.value = "Escaneo BLE falló: $errorCode"
                     }
                 } }
             }
             scanningCallback = callback
             _scanRequested.value = true
+            MeshDebugLog.emit(MeshDiagnostic("scan", status = "REQUESTED"))
             _lastError.value = null
             scanner!!.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(serviceUuid)).build()),
                 ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), callback)
@@ -318,6 +336,7 @@ class BLEMeshController(context: Context) {
         scanner = null
         _isScanning.value = false
         _peers.value = emptyList()
+        MeshDebugLog.emit(MeshDiagnostic("scan", status = "STOPPED"))
     }
 
     private class Send(val address: String, val name: String, val message: String, val payload: ByteArray) {

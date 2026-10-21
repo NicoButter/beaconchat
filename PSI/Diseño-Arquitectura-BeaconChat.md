@@ -1,11 +1,11 @@
 # 04 · Arquitectura actual y propuesta
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 20/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 21/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Casos de uso](Casos-de-Uso-BeaconChat.md)
 
 ## Base verificable y fuentes locales
 
-Base del checkout `1ad627541911a647d35b9deb5188c8bcb017adad` de `main`, limpia al comenzar #6. Mesh Android, SOS offline y gateway HTTPS sintético están implementados en código; sus pruebas JVM no demuestran radio ni adquisición satelital físicas, y `LightMapScreen` no demuestra mapas geográficos.
+Base del checkout `7ca62ab2ac5fb6cd05cb4b96366dfdee5dfcfa9b` de `main`, limpia y coincidente con el remoto al comenzar #7A. Mesh Android, SOS offline y gateway HTTPS sintético están implementados en código; sus pruebas JVM no demuestran radio ni adquisición satelital físicas, y `LightMapScreen` no demuestra mapas geográficos.
 
 | Fuente | Evidencia |
 | --- | --- |
@@ -89,7 +89,17 @@ Hay hasta 16 vecinos, 8 trabajos incluyendo el activo, 8 sesiones entrantes y 32
 
 El diálogo “Mesh experimental” de `MeshScreen` permite activar/desactivar participación, originar pruebas con destino opcional y TTL, copiar NodeId y consultar vecinos/actividad. La participación mantiene scan/publicidad en primer plano y se desactiva al pausar/salir. La UI distingue origen local, cola local, escrito en enlace y recibido localmente. **Handoff y recibo de trama no confirman el destino final.** No hay ACK extremo a extremo, autenticación ni cifrado.
 
-La base de **183 tests JVM** se reejecutó antes de #6; ahora [Validación](Validacion-BeaconChat.md) registra **225 aprobados**, con 42 nuevos de gateway/contrato/HTTPS falso/integración. Android/GATT/GPS/HTTPS están implementados y compilados; BLE, satélites, conectividad y TLS reales siguen pendientes. El gateway está integrado, sin servidor ni mapas.
+La base de **225 tests JVM** se conserva; [Validación](Validacion-BeaconChat.md) registra **235 aprobados**, con 10 nuevos de sesiones/temporización/diagnóstico en #7A. Android/GATT/GPS/HTTPS están implementados y compilados; BLE, satélites, conectividad y TLS reales siguen pendientes. El gateway está integrado, sin servidor ni mapas.
+
+### Estabilización BLE · implementación #7A
+
+`MeshIncomingSessions` vincula cada sesión lógica a una conexión entrante registrada por el callback CONNECTED. Direcciones/callbacks duplicados conservan la misma encarnación. Una sesión vencida queda en cierre y ocupa su cuota hasta el DISCONNECTED real; solicitudes posteriores no pueden recrearla sobre el mismo enlace. El servidor mantiene un máximo de 8 conexiones registradas y cada reconexión obtiene otro token. Detener el servidor limpia el registro. El cliente comprueba deadlines también al procesar callbacks; el servidor los comprueba al procesar solicitudes y el tráfico rechazado no renueva inactividad.
+
+`MeshBleTiming` conserva 5 s por operación y 30 s de cola/vecinos, y fija transferencia `max(14000, tramas × 300 + 1000)` ms: 14–41,5 s. El presupuesto experimental de 150 ms por WRITE y READ permite 135 tramas máximas sin abandonar las cuotas de recursos. El adaptador inyecta reensamblado absoluto de 42,5 s; trabajo saliente 61,5 s y sesión entrante 62,5 s, con inactividad de 20 s. IDs de 16 bits no vuelven a 0 durante esa retención. No cambian memoria máxima, tamaños, cuotas de transferencias, TTL/dedupe ni wire V1. El reensamblador genérico conserva su default de 15 s para otros hosts. Peers con APK previa pueden vencer a los 14/15 s: el hello V1 no negocia ventanas; las pruebas lentas requieren la misma APK.
+
+`MeshDiagnostics` transmite únicamente metadatos tipados a un observador opcional; `MeshDebugLog` escribe tag `BeaconMesh` solo en debug. Mide connect/discovery/identidades/WRITE/READ, transferencia y trabajo completos; registra radio, identidad declarada, sesiones, fragmentos, UUID/TTL de recepción/reenvío y fallos. No recibe payload, coordenadas, notas, credenciales ni mensajes de excepción. Su fallo no interrumpe transporte. No modifica el historial experimental ni convierte LINK_WRITTEN en confirmación del destino.
+
+Con GATT falso a 100 ms por operación: HOLA 1,6 s, SOS típico 5,2 s, máximo SOS 12,2 s y 1024 bytes 27 s de transferencia. El máximo también completa a 150 ms/operación en 40,5 s; a 200 ms vence sin entrega parcial. Estos tiempos son simulados. ADB no detectó teléfonos: A↔B/A→B→C físicos **NO EJECUTADOS**. [Validación](Validacion-BeaconChat.md) contiene cargas públicas verificadas por JVM, herramientas por serial explícito, mediciones y procedimiento con aislamiento comprobable. No se añade backend, mapas, protocolos alternativos ni transmisión GNSS real.
 
 ### SOS offline y separación de datos reales/sintéticos
 

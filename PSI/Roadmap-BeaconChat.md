@@ -1,15 +1,15 @@
 # 07 · Roadmap y puertas de validación
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 20/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 21/10/2026**
 [Índice](../README.md) · [Validación](Validacion-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
 
 ## Etapas propuestas
 
 Las etapas expresan dependencias y evidencia, no fechas prometidas. E0 es la base; E2 tiene adaptador Android/codec/fragmentos implementados y E3 tiene SOS/GPS local, ensayos sintéticos y gateway HTTPS, sin cerrar las puertas físicas ni de seguridad. Backend/centro E3 y E4/E5 siguen propuestos. No se asignan compromisos a organizaciones no consultadas.
 
-## Estado tras implementación #6
+## Estado tras implementación #7A
 
-Base de **183 tests JVM** reejecutada; resultado actual **225 aprobados (42 nuevos de gateway)**, con APK debug en Gradle 8.13/JDK 21. Gateway HTTPS Android integrado y apagado por defecto, recibe SOS sintéticos mesh aceptados, deduplica UUID/contenido, administra cola volátil y valida comprobante correlacionado de API falsa. GNSS real sigue bloqueado. No hay validación física BLE/GNSS/HTTPS ni backend real. [Contrato y evidencia](Validacion-BeaconChat.md).
+Resultado actual: **235 tests JVM aprobados (225 de base + 10 nuevos BLE)**, con APK debug en Gradle 8.13/JDK 21. #7A corrige sesiones entrantes y deadlines, agrega mediciones sin payload y prepara herramientas/procedimiento físico. Las duraciones de 1,6–40,5 s reportadas son simuladas; ADB sin dispositivos, A↔B/A→B→C **NO EJECUTADOS**. Gateway HTTPS Android integrado y apagado por defecto, recibe SOS sintéticos mesh aceptados, deduplica UUID/contenido, administra cola volátil y valida comprobante correlacionado de API falsa. GNSS real sigue bloqueado. No hay validación física BLE/GNSS/HTTPS ni backend real. [Contrato y evidencia](Validacion-BeaconChat.md).
 
 | Etapa | Resultado y alcance | Dependencias | Puerta de salida / pruebas |
 | --- | --- | --- | --- |

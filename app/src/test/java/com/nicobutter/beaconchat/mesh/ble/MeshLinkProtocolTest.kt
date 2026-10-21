@@ -34,9 +34,9 @@ class MeshLinkProtocolTest {
     @Test fun transferIdsDoNotRepeatAcrossConnectionsOrWrapInsideRetention() {
         val ids = MeshTransferIds()
         repeat(65536) { assertEquals(it, ids.allocate(1)) }
-        try { ids.allocate(15_000); fail("ID reused early") } catch (_: IllegalStateException) { }
-        assertEquals(0, ids.allocate(15_001))
-        assertEquals(1, ids.allocate(15_001))
+        try { ids.allocate(MeshBleTiming.REASSEMBLY_MILLIS); fail("ID reused early") } catch (_: IllegalStateException) { }
+        assertEquals(0, ids.allocate(MeshBleTiming.REASSEMBLY_MILLIS + 1))
+        assertEquals(1, ids.allocate(MeshBleTiming.REASSEMBLY_MILLIS + 1))
     }
     @Test fun legacyPacketsCannotBecomeHelloOrMeshDataAndLegacyRulesStayIntact() {
         val legacy = DirectBleProtocol.encode("ABCDEFGH", "12345678901")

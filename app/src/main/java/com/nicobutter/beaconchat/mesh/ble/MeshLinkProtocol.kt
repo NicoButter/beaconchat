@@ -40,7 +40,8 @@ internal class MeshTransferIds {
         check(next != 0 || now >= wrapAfter) { "IDs mesh agotados temporalmente" }
         val result = next
         next = (next + 1) and 0xffff
-        if (next == 0) wrapAfter = if (now > Long.MAX_VALUE - 15_000) Long.MAX_VALUE else now + 15_000
+        if (next == 0) wrapAfter = if (now > Long.MAX_VALUE - MeshBleTiming.REASSEMBLY_MILLIS) Long.MAX_VALUE
+            else now + MeshBleTiming.REASSEMBLY_MILLIS
         return result
     }
 }

@@ -32,7 +32,7 @@ class AndroidMeshTransport(context: Context) {
     val internetGateway = AndroidSosInternetGateway(this.context)
     private var activeGatt: BluetoothGatt? = null
     private var activeToken: Long? = null
-    private val incoming = linkedMapOf<String, MeshLinkSession>()
+    private val incoming = MeshIncomingSessions()
     var cancelServerConnection: (String) -> Unit = {}
     val outgoingBusy get() = node?.client?.busy == true
     private val ticker = object : Runnable {
@@ -56,7 +56,7 @@ class AndroidMeshTransport(context: Context) {
                 }
                 handler.post {
                     node = MeshBleNode(NodeId(identity), clock, MeshGattPort(::execute), { _state.value = it },
-                        ::expireIncoming, internetGateway::onAcceptedMesh)
+                        ::expireIncoming, internetGateway::onAcceptedMesh, MeshDebugLog)
                     node!!.setDirectBusy(directBusy)
                 }
             } catch (e: Exception) {
@@ -83,15 +83,14 @@ class AndroidMeshTransport(context: Context) {
 
     private fun serverSession(address: String): MeshLinkSession? {
         if (!_state.value.enabled) return null
-        incoming[address]?.let { return it }
-        if (incoming.size >= 8) return null
-        val session = MeshLinkSession(UUID.randomUUID())
-        if (node?.openIncoming(session) != true) return null
-        incoming[address] = session
-        return session
+        return incoming.getOrOpen(address) { node?.openIncoming(it) == true }
+    }
+    fun serverConnected(address: String) {
+        MeshDebugLog.emit(MeshDiagnostic("server_connection", peer = address, status = "CONNECTED"))
+        if (!incoming.connected(address)) cancelServerConnection(address)
     }
     fun serverWrite(address: String, characteristic: UUID, value: ByteArray): Boolean {
-        val session = if (characteristic == MeshGattContract.IDENTITY_UUID) serverSession(address) else incoming[address]
+        val session = if (characteristic == MeshGattContract.IDENTITY_UUID) serverSession(address) else incoming.get(address)
         session ?: return false
         return when (characteristic) {
             MeshGattContract.IDENTITY_UUID -> node?.acceptIdentity(session, value) == true
@@ -100,7 +99,7 @@ class AndroidMeshTransport(context: Context) {
         }
     }
     fun serverRead(address: String, characteristic: UUID): ByteArray? {
-        val session = if (characteristic == MeshGattContract.IDENTITY_UUID) serverSession(address) else incoming[address]
+        val session = if (characteristic == MeshGattContract.IDENTITY_UUID) serverSession(address) else incoming.get(address)
         session ?: return null
         return when (characteristic) {
             MeshGattContract.IDENTITY_UUID -> node?.readIdentity(session)
@@ -108,11 +107,13 @@ class AndroidMeshTransport(context: Context) {
             else -> null
         }
     }
-    fun serverDisconnected(address: String) { incoming.remove(address)?.let { node?.closeIncoming(it) } }
-    fun serverStopped() { incoming.values.toList().forEach { node?.closeIncoming(it) }; incoming.clear() }
+    fun serverDisconnected(address: String) {
+        MeshDebugLog.emit(MeshDiagnostic("server_connection", peer = address, status = "DISCONNECTED"))
+        incoming.disconnected(address)?.let { node?.closeIncoming(it) }
+    }
+    fun serverStopped() { incoming.clear().forEach { node?.closeIncoming(it) } }
     private fun expireIncoming(session: MeshLinkSession) {
-        val address = incoming.entries.firstOrNull { it.value == session }?.key ?: return
-        incoming.remove(address)
+        val address = incoming.retire(session) ?: return
         cancelServerConnection(address)
     }
 
@@ -169,10 +170,12 @@ class AndroidMeshTransport(context: Context) {
             node?.let { _state.value = it.snapshot() }
         } }
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) = dispatch(gatt) {
+            MeshDebugLog.emit(MeshDiagnostic("client_connection", token, status = "GATT_${status}_STATE_$newState"))
             if (status != BluetoothGatt.GATT_SUCCESS || newState == BluetoothProfile.STATE_DISCONNECTED) it.disconnected(token)
             else if (newState == BluetoothProfile.STATE_CONNECTED) it.connected(token, true)
         }
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) = dispatch(gatt) {
+            MeshDebugLog.emit(MeshDiagnostic("client_callback", token, phase = "DISCOVER", status = "GATT_$status"))
             val service = gatt.getService(MeshGattContract.SERVICE_UUID)
             val identity = service?.getCharacteristic(MeshGattContract.IDENTITY_UUID)
             val data = service?.getCharacteristic(MeshGattContract.CHARACTERISTIC_UUID)
@@ -181,6 +184,7 @@ class AndroidMeshTransport(context: Context) {
                 identity.properties and flags == flags && data.properties and flags == flags)
         }
         override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) = dispatch(gatt) {
+            MeshDebugLog.emit(MeshDiagnostic("client_callback", token, phase = "WRITE", status = "GATT_$status"))
             when (characteristic.uuid) {
                 MeshGattContract.IDENTITY_UUID -> it.identityWritten(token, status == BluetoothGatt.GATT_SUCCESS)
                 MeshGattContract.CHARACTERISTIC_UUID -> it.frameWritten(token, status == BluetoothGatt.GATT_SUCCESS)
@@ -189,6 +193,7 @@ class AndroidMeshTransport(context: Context) {
         private fun read(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
             val copy = if (value.size <= 20) value.copyOf() else byteArrayOf()
             dispatch(gatt) {
+                MeshDebugLog.emit(MeshDiagnostic("client_callback", token, phase = "READ", status = "GATT_$status"))
                 when (characteristic.uuid) {
                     MeshGattContract.IDENTITY_UUID -> it.identityRead(token, copy, status == BluetoothGatt.GATT_SUCCESS)
                     MeshGattContract.CHARACTERISTIC_UUID -> it.receiptRead(token, copy, status == BluetoothGatt.GATT_SUCCESS)

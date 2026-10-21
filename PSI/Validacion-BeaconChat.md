@@ -1,7 +1,110 @@
 # 06 · Validación y criterios de aceptación
 
-**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 20/10/2026**
+**Vetrabyte / Nicolás Butterfield · [MIT](../LICENSE) · Borrador para revisión · Actualizado 21/10/2026**
 [Índice](../README.md) · [Requerimientos](ERS-BeaconChat.md) · [Trazabilidad](Trazabilidad-BeaconChat.md)
+
+## Implementación #7A · Estabilización Mesh BLE · 21/10/2026
+
+**235 tests JVM aprobados (225 anteriores + 10 nuevos), APK debug compilada. Pruebas físicas A↔B y A→B→C: NO EJECUTADAS.** `adb devices -l`, ejecutado fuera del sandbox tras el rechazo local de sockets, devolvió una lista vacía. No se instaló la APK, no hubo emuladores usados como evidencia de radio ni se midieron latencias BLE reales. Los resultados siguientes usan el cliente, nodo, codec y motor de producción con callbacks GATT falsos y reloj monotónico simulado.
+
+### Base y defectos demostrables
+
+Checkout inicialmente limpio, rama `main`, HEAD y `origin/main` **`7ca62ab2ac5fb6cd05cb4b96366dfdee5dfcfa9b`**. Se confirmó también el HEAD de `main` mediante el conector GitHub. Sin ramas/worktrees, commit ni push. La primera invocación de Gradle con JDK 21 completó las 44 tareas como UP-TO-DATE; la verificación posterior sí ejecutó la suite completa. El JDK utilizable está en `/home/lordcommander/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2`; `/usr/lib/jvm/java-21-openjdk` no contiene ejecutables en este entorno. Gradle requirió ejecución exterior para escribir los locks de su caché.
+
+| Hallazgo / causa | Corrección y evidencia |
+| --- | --- |
+| El servidor creaba una sesión al leer/escribir identidad sin exigir una conexión registrada. Al expirar, eliminaba la asociación antes de que `cancelConnection` terminara; otra solicitud sobre el mismo enlace podía crear un nuevo token y reiniciar su vida máxima | `MeshIncomingSessions` registra conexiones físicas, conserva enlaces en cierre dentro de la cuota de 8 y exige desconexión antes de recrearlos. El callback del servidor registra CONNECTED. Cuatro tests cubren tráfico inválido sin refrescar inactividad, solicitudes sin conexión, callbacks repetidos, cierre demorado, cuota, reinicio del servidor y reconexión con nuevo token |
+| Los deadlines se comprobaban solo en el ticker de 1 s. Un callback de éxito recibido al vencer el plazo podía avanzar/finalizar antes del ticker; una solicitud entrante podía refrescar una sesión ya vencida | El cliente verifica deadlines antes de cada callback pertinente. El nodo verifica expiración al leer identidad/recibo y aceptar identidad/fragmentos; los rechazos no refrescan la inactividad. Se prueba éxito exactamente a los 5 s sin ticker y expiración entrante sin ticker |
+| Unicast de 1024 bytes = 1077 bytes de envelope, 135 tramas y 270 operaciones WRITE/READ. Los 14 s originales permiten menos de 51,86 ms de media por operación, sin margen. Con 100 ms son 27 s; además el reensamblado vencía a los 15 s y la sesión a los 30 s | Presupuesto por cantidad de tramas, retención receptora y vida de sesión coherentes; prueba completa a 100 y 150 ms por operación. Tráfico demasiado lento sigue fallando sin entrega parcial; el progreso no renueva deadlines |
+
+### Política temporal y recursos
+
+`MeshBleTiming` centraliza la política del **adaptador BLE**. Por transferencia de N tramas: `max(14000, N × 300 + 1000)` ms. Los 300 ms son un presupuesto experimental de 150 ms por WRITE y por READ; el segundo adicional permite planificación. **No son percentiles medidos ni capacidad prometida de Android.** Se conserva el mínimo previo para mensajes pequeños y se limita el máximo por el tamaño permitido del envelope.
+
+| Recurso | Política #7A |
+| --- | --- |
+| Operación GATT | 5.000 ms, incluidos connect/discover/identidades; vence con `now >= deadline` |
+| Transferencia | 14.000–41.500 ms, desde iniciar la primera escritura hasta verificar el último recibo |
+| Reensamblado BLE | 42.500 ms absolutos desde la primera trama, incluidos tombstones; duplicados/progreso no renuevan |
+| Trabajo saliente | 61.500 ms absolutos: cuatro operaciones de handshake × 5.000 + máximo de transferencia |
+| Sesión entrante | 62.500 ms absolutos y 20.000 ms sin escritura/identidad válida; termina al alcanzar cualquiera |
+| Cola de enlace / vecino / cooldown de probe | 30.000 ms; se conservan los vencimientos, sin reintentos automáticos |
+| IDs de transferencia | La vuelta de 16 bits espera al menos 42.500 ms desde la última asignación antes de reutilizar 0 |
+| Cuotas | 16 vecinos, 8 trabajos incluido activo, 8 sesiones/conexiones registradas, 32 eventos; reensamblado: 8 activos, 2 por sesión, 32 registros, reserva máxima 8 × 1077 = 8616 bytes |
+
+La retención más larga aumenta el tiempo de ocupación máximo, **no la memoria máxima**. Desconexión, desactivación y pausa liberan buffers inmediatamente. Si Android no notifica DISCONNECTED tras cancelar, el enlace en cierre conserva su plaza hasta detener/reiniciar el servidor; no se recicla para eludir la expiración. El `MeshReassembler` genérico conserva su default de 15 s para otros hosts; `MeshBleNode` inyecta explícitamente 42,5 s. Esperar tras otro envío largo puede vencer un trabajo en cola: se registra el fallo, no se extiende la cola para ocultarlo. Dedupe del motor continúa en 120 s, temporal y sin custodia durable.
+
+No cambian UUID de características, hello V1 de 20 bytes, envelope V1, cabecera de trama, CRC, formato de recibos ni chat directo. **El hello V1 no anuncia ventanas temporales:** un APK previo conserva 14/15 s y puede rechazar una transferencia lenta con esta versión. Los paquetes siguen siendo compatibles; las pruebas de cargas lentas requieren la misma APK en todos los equipos. No se promete interoperabilidad temporal ampliada con APK previas ni se añade negociación/protocolo alternativo.
+
+### Mediciones reproducibles con GATT falso
+
+`MeshBleTimingTest` introduce exactamente 100 ms antes de cada callback; cada handshake requiere 4 operaciones = 400 ms. Los valores de la tabla son duración simulada del enlace, no tiempo de ejecución JVM ni latencia de radio. Destino unicast B, TTL recibido 0:
+
+| Carga pública de ensayo | Contenido UTF-8 | Envelope | Tramas | WRITE + READ | Transferencia | Total con handshake |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `short` (`HOLA`) | 4 B | 57 B | 8 | 16 | 1.600 ms | 2.000 ms |
+| `sos_typical` | 148 B | 201 B | 26 | 52 | 5.200 ms | 5.600 ms |
+| `sos_maximum` (nota sintética de 256 B) | 433 B | 486 B | 61 | 122 | 12.200 ms | 12.600 ms |
+| `mesh_1024` | 1024 B | 1077 B | 135 | 270 | 27.000 ms | 27.400 ms |
+
+Con **150 ms/operación**, el máximo completa en **40.500 ms** de transferencia y 41.100 ms totales, atravesando correctamente el antiguo límite de sesión de 30 s. Con **200 ms/operación**, falla al alcanzar el deadline de transferencia; el receptor no entrega contenido parcial y el cierre libera memoria. Se prueba además retención receptora absoluta con fragmentos a 0, 19 y 38 s, expirada a 42,5 s.
+
+Las cuatro cargas están en [mesh-ble-fixtures.properties](../app/src/test/resources/mesh-ble-fixtures.properties), listas para copiar después de `=` al campo de mensaje mesh. Los tests leen ese mismo recurso, decodifican ambos SOS con el codec de producción y comprueban política sintética, round-trip, nota máxima y 1024 bytes. Los SOS usan UUID/creación constantes de laboratorio y coordenada fija permitida; no se copian notas ni posiciones del usuario. Mantener el gateway apagado para estas pruebas BLE; el UUID SOS constante no sirve para medir admisiones HTTP independientes.
+
+### Diagnóstico y auditoría Android
+
+Solo en APK **debug**, tag Logcat **`BeaconMesh`**. `MeshDiagnostic` admite metadatos: evento, fase, token, duraciones monotónicas, índice/cantidad/ID de transferencia, ID de mensaje, TTL restante, dirección temporal, NodeId, token de sesión y estados fijos. **No admite payload, nota, coordenadas, endpoint, credenciales ni texto de excepción.** El log Android se desactiva en release; una excepción del observador de diagnóstico no afecta admisión ni recibos.
+
+- `advertising` y `scan`: solicitado/iniciando, éxito real de publicidad, primer resultado de scan, error y detención. El scan no inventa un callback de inicio. Registro de servicio GATT precede a publicidad; generaciones impiden reactivar una sesión de publicidad detenida.
+- `neighbor_discovered`, `neighbor_expired`, `identity_verified`, `incoming_identity`: descubrimiento, expiración y capacidad/identidad declarada verificada sin autenticación.
+- `client_connection`, `server_connection`, `client_callback`, `server_operation`: conexión/desconexión y estados GATT numéricos, sin payload.
+- `gatt_operation`: latencias CONNECTING, DISCOVERING, READING_IDENTITY, WRITING_IDENTITY, WRITING_FRAME y READING_RECEIPT. `gatt_result`: transferencia y tiempo completo, excluye espera previa en cola y cierre físico; PROBED/LINK_WRITTEN/FAILED/CANCELLED. `gatt_timeout` distingue operación, transferencia y trabajo.
+- `incoming_fragment`: índice/cantidad y admisión/duplicado/rechazo/completo; COMPLETE indica reensamblado, aún debe pasar codec/política/motor. `receipt_ignored` conserva la correlación ante lecturas viejas.
+- `mesh_receive`, `mesh_forward`, `mesh_activity`: UUID de mensaje, TTL de entrada/salida, recepción local, cola/enlace y fallos de retransmisión. Correlacionar el mismo UUID entre equipos para contar saltos; no se inventa un contador global de saltos inexistente en V1.
+- `incoming_expired`, `incoming_closed`, `direct_link`: liberación de recursos y exclusión del cliente saliente durante chat directo. Se conserva un cliente saliente por nodo; callbacks de otra conexión/token se ignoran y WRITE solo avanza con READ correlacionado. Un callback WRITE muy tardío puede producir fallo acotado, nunca confirma por sí mismo el fragmento actual.
+
+La UI conserva el carácter experimental y distingue escritura al enlace de recepción local y destino final sin confirmar. Se revisaron permisos API 24–30 (ubicación para scan) y 31+ (Nearby Devices), ramas de lectura/escritura API 33 y detención en pausa; no se afirma su ejecución en Android real. Referencias primarias: [permisos BLE](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions), [callbacks de cliente y lectura segura API 33](https://developer.android.com/reference/android/bluetooth/BluetoothGattCallback), [callbacks de servidor por dispositivo](https://developer.android.com/reference/android/bluetooth/BluetoothGattServerCallback). El funcionamiento simultáneo scan/advertising/central/peripheral continúa sujeto al hardware; se mantienen ambas solicitudes y se registran sus resultados, sin asumir soporte por compilación.
+
+### Procedimiento físico preparado · NO EJECUTADO
+
+Herramientas nuevas: [mesh-ble-lab.sh](../scripts/mesh-ble-lab.sh) y [mesh-ble-summary.py](../scripts/mesh-ble-summary.py). Exigen seriales explícitos, no seleccionan el primer dispositivo, no desinstalan ni borran datos, no activan radios/permisos automáticamente. `capture` filtra exclusivamente `BeaconMesh`, conserva el buffer Logcat global y termina tras el tiempo pedido. `summary` emite count/min/mediana/p95/máximo por fase y resultados del enlace; los enlaces fallidos no se mezclan con transferencias exitosas. Sintaxis Bash y resumen se verificaron con líneas sintéticas; instalación/captura ADB no se ejecutaron.
+
+```bash
+export JAVA_HOME=/home/lordcommander/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2
+./gradlew testDebugUnitTest assembleDebug
+adb devices -l
+# Sustituir por seriales REALES autorizados; no ejecutar estos placeholders.
+bash scripts/mesh-ble-lab.sh inventory SERIAL_A SERIAL_B
+bash scripts/mesh-ble-lab.sh install SERIAL_A SERIAL_B
+# Una terminal por teléfono; empezar la captura antes de activar mesh.
+bash scripts/mesh-ble-lab.sh capture SERIAL_A /tmp/mesh-A.log 240
+bash scripts/mesh-ble-lab.sh capture SERIAL_B /tmp/mesh-B.log 240
+bash scripts/mesh-ble-lab.sh summary /tmp/mesh-A.log
+# Extraer un valor completo para copiarlo al campo de mensaje mesh:
+sed -n 's/^sos_maximum=//p' app/src/test/resources/mesh-ble-fixtures.properties
+```
+
+**A↔B:** registrar serial/modelo/API/NodeId, SHA de APK, hora local/UTC, permisos y Bluetooth. Modo avión, Bluetooth reactivado, IP/tethering apagado y gateway desactivado. En API ≤30 activar Ubicación para scan. Mantener pantalla Mesh en primer plano y participar en ambos. Confirmar `advertising STARTED`, scan con resultados y NodeId del otro verificado. Enviar cada fixture a NodeId B con TTL=1 y repetir en sentido contrario; comprobar UUID, texto íntegro/longitud, LOCAL_RECEIVED único y LINK_WRITTEN independiente. Repetir diez cortos alternados y envíos simultáneos. Registrar duraciones reales por fase con la herramienta.
+
+**A→B→C:** instalar/inventariar C por serial explícito. Usar separación física/atenuación verificable: documentar posiciones, distancias o montaje de radio; **un filtro lógico de vecinos no demuestra aislamiento**. Con B apagado, verificar que A y C no establecen chat ni probe entre sí; con B activo demostrar A↔B y B↔C y ausencia de enlace A↔C durante el ensayo. Si no se puede demostrar el aislamiento, registrar el multisalto físico como NO EJECUTADO.
+
+1. Destino NodeId C, fixture corta, TTL=1: A escribe TTL=0 a B; en B verificar recepción de tránsito y TTL_EXHAUSTED; C no debe generar LOCAL_RECEIVED para ese UUID.
+2. Nueva originación, TTL=2: A→B lleva TTL=1; B→C lleva TTL=0. Correlacionar el mismo UUID/origen/destino en los tres logs, un único LOCAL_RECEIVED en C y ninguna entrega unicast local en B. Repetir SOS típico, máximo y 1024 bytes, luego invertir el sentido.
+3. Desactivar participación/Bluetooth de B y repetir con nuevo ID y TTL=2: C no recibe. Rehabilitar B, redescubrir y repetir con éxito. No atribuir dependencia del relay si A y C pueden conectarse directamente. Permitir hasta 190 s para cerrar una observación negativa de dos enlaces (dos esperas de cola + dos trabajos máximos); correlacionar el fallo/TTL registrado, no solo ausencia visual.
+4. Apagar Bluetooth durante escritura/lectura, alejar peer, pausar/salir, revocar/restaurar permisos y reconectar. Verificar cierre acotado, cero entrega parcial, NodeId persistente, nueva sesión y posibilidad de enviar de nuevo. Ante timeout la entrega puede haber ocurrido sin recibo: no inventar fracaso remoto seguro.
+5. Durante una transferencia mesh, intentar chat directo: debe indicar ocupado. Tras finalizar, verificar directo A↔B con `sí:🆘`, sin cambiar su límite de 20 bytes ni su etiqueta sin ACK. Repetir pausa y Bluetooth off/on durante chat. Mantener GNSS real local/bloqueado y gateway apagado; las regresiones JVM cubren GNSS, SOS y gateway, pero no prueban sensores/HTTPS físicos.
+
+Registrar una fila por intento: `fecha_local,fecha_UTC,escenario,serial,modelo,Android/API,SHA_APK,NodeId_local,NodeId_destino,messageId,fixture,bytes,TTL,aislamiento,resultado,connect_ms,discover_ms,identity_read_ms,identity_write_ms,write_mediana_ms,receipt_mediana_ms,transfer_ms,total_ms`. Incluir resultado observado en cada equipo y evidencia de relay/B apagado. Actualmente **sin filas físicas**, tiempos reales **NO MEDIDOS**.
+
+### Verificación #7A y pendientes
+
+`JAVA_HOME=... ./gradlew testDebugUnitTest assembleDebug`: **BUILD SUCCESSFUL**, **235 tests, 0 fallos, 0 errores, 0 omitidos**. Se conservan los tests anteriores de chat directo, TTL/dedupe/topologías, golden bytes V1, SOS/GNSS/política de privacidad y gateway. Nuevos: 6 de temporización/mediciones/privacidad del diagnóstico y 4 del registro/expiración de conexiones. La primera compilación de los nuevos tests detectó un nombre incorrecto del helper y la primera ejecución un destino de fixture incorrecto; se corrigieron antes de la suite exitosa. Sin nuevas dependencias, permisos, cifrado, backend, mapas o cambios de negocio.
+
+APK local: `app/build/outputs/apk/debug/app-debug.apk`, **12.349.576 bytes**, SHA-256 **`36dbe5ca5eaae4bea2c43769b705c43683d3b051d45352390e0742b44812fc81`**. Reportes: `app/build/reports/tests/testDebugUnitTest/index.html` y XML en `app/build/test-results/testDebugUnitTest/`. `git diff --check` correcto. Se mantienen advertencias previas de BuildConfig/Java 8/Gradle; Lint e instrumentación no ejecutados en #7A.
+
+Pendientes: Android de distintos fabricantes/versiones, concurrencia de roles, latencias/consumo/rango reales, cola bajo fanout lento, reconexión física y cadena aislada. El presupuesto 150 ms/operación debe revisarse contra mediciones reales. Sin ACK extremo a extremo, autenticación, custodia durable ni entrega garantizada. GNSS real continúa bloqueado en mesh y gateway. Los informes #6 y anteriores siguientes son históricos.
+
+---
 
 ## Implementación #6 · Gateway experimental HTTPS · 20/10/2026
 

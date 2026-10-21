@@ -42,7 +42,7 @@ Los canales tienen limitaciones diferentes: BLE exige alcance radioeléctrico y 
 | Preferencias | Almacena el callsign con AndroidX DataStore | Implementado |
 | Historial permanente, ACK extremo a extremo, cifrado propio, entrega garantizada | No disponibles en el chat BLE actual | Pendiente / fuera del alcance presente |
 
-En los Issues [#1](https://github.com/NicoButter/beaconchat/issues/1) y [#2](https://github.com/NicoButter/beaconchat/issues/2) están los requisitos iniciales. La base de **183 tests JVM** se reejecutó antes de #6; el gateway eleva la suite a **225 aprobados (183 + 42), sin fallos**, con APK debug compilada en Gradle 8.13/JDK 21. Son simulaciones y evidencia de compilación, **no ensayos físicos de GPS/BLE/HTTPS ni certificación**. [Contrato, archivos y evidencia](PSI/Validacion-BeaconChat.md).
+En los Issues [#1](https://github.com/NicoButter/beaconchat/issues/1) y [#2](https://github.com/NicoButter/beaconchat/issues/2) están los requisitos iniciales. La implementación #7A conserva los 225 tests previos y eleva la suite a **235 aprobados (10 nuevos BLE), sin fallos**, con APK debug compilada en Gradle 8.13/JDK 21. Incluye estabilización de sesiones/deadlines y herramientas de diagnóstico por serial ADB; A↔B/A→B→C físicos **NO EJECUTADOS**, sin teléfonos conectados. Son simulaciones y evidencia de compilación, **no ensayos físicos de GPS/BLE/HTTPS ni certificación**. [Contrato, archivos y evidencia](PSI/Validacion-BeaconChat.md).
 
 ## Arquitectura
 
@@ -244,7 +244,7 @@ Every medium has constraints: BLE requires compatible radios within range; light
 | DataStore | Persistent callsign preference | Implemented |
 | Durable chat history, app-level end-to-end ACK, custom encryption, guaranteed delivery | Not available for current direct BLE chat | Planned or out of scope |
 
-The initial requirements are in [Issue #1](https://github.com/NicoButter/beaconchat/issues/1) and [Issue #2](https://github.com/NicoButter/beaconchat/issues/2). The **183-test JVM baseline** was rerun before #6; the gateway raises the suite to **225 passing tests (183 + 42), zero failures**, with a debug APK built using Gradle 8.13/JDK 21. These are simulations and build evidence, **not physical GPS/BLE/HTTPS validation or certification**. [Contract, files and evidence](PSI/Validacion-BeaconChat.md).
+The initial requirements are in [Issue #1](https://github.com/NicoButter/beaconchat/issues/1) and [Issue #2](https://github.com/NicoButter/beaconchat/issues/2). Implementation #7A preserves the previous 225 tests and raises the suite to **235 passing tests (10 new BLE tests), zero failures**, with a debug APK built using Gradle 8.13/JDK 21. It stabilizes sessions/deadlines and adds diagnostics using explicit ADB serials; physical A↔B/A→B→C tests were **NOT RUN**, with no connected phones. These are simulations and build evidence, **not physical GPS/BLE/HTTPS validation or certification**. [Contract, files and evidence](PSI/Validacion-BeaconChat.md).
 
 ## Architecture
 
