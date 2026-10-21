@@ -4,32 +4,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.nicobutter.beaconchat.data.UserPreferences
 import com.nicobutter.beaconchat.controller.EmergencyManager
-import com.nicobutter.beaconchat.domain.EmergencyMode
-import com.nicobutter.beaconchat.domain.EmergencyType
 import com.nicobutter.beaconchat.emitter.BleEmitter
 import com.nicobutter.beaconchat.emitter.LightEmitter
 import com.nicobutter.beaconchat.emitter.SoundEmitter
@@ -48,7 +31,8 @@ import com.nicobutter.beaconchat.ui.screens.SettingsScreen
 import com.nicobutter.beaconchat.ui.screens.SignalScannerScreen
 import com.nicobutter.beaconchat.ui.screens.TransmitterScreen
 import com.nicobutter.beaconchat.ui.screens.VibrationDetectorScreen
-import com.nicobutter.beaconchat.ui.screens.WelcomeScreen
+import com.nicobutter.beaconchat.ui.AppScreen
+import com.nicobutter.beaconchat.ui.BeaconNavigation
 import com.nicobutter.beaconchat.ui.screens.EmergencyTransmissionScreen
 import com.nicobutter.beaconchat.ui.theme.BeaconChatTheme
 
@@ -110,190 +94,33 @@ class MainActivity : ComponentActivity() {
 
                 setContent {
                         BeaconChatTheme {
-                                Surface(
-                                        modifier = Modifier.fillMaxSize(),
-                                        color = MaterialTheme.colorScheme.background
-                                ) {
-                                        var currentScreen by remember { mutableStateOf("welcome") }
-                                        var emergencyType by remember { mutableStateOf<EmergencyType?>(null) }
-                                        var emergencyMode by remember { mutableStateOf(EmergencyMode.ALL) }
-
-                                Scaffold(
-                                        modifier = Modifier.fillMaxSize(),
-                                        bottomBar = {
-                                                if (currentScreen != "welcome" && currentScreen != "emergency") {
-                                                        NavigationBar(
-                                                                containerColor = MaterialTheme.colorScheme.surface,
-                                                                tonalElevation = 8.dp
-                                                        ) {
-                                                                val navItems = listOf(
-                                                                        Triple("transmit", "🔦", "Transmit"),
-                                                                        Triple("receive", "📷", "Receive"),
-                                                                        Triple("scan", "🔍", "Scan"),
-                                                                        Triple("mesh", "📡", "Mesh"),
-                                                                        Triple("lightmap", "🎯", "Radar"),
-                                                                        Triple("oscilloscope", "📊", "Scope"),
-                                                                        Triple("settings", "⚙️", "Settings")
-                                                                )
-                                                                navItems.forEach { (screen, emoji, label) ->
-                                                                        val interactionSource = remember { MutableInteractionSource() }
-                                                                        val isPressed by interactionSource.collectIsPressedAsState()
-                                                                        val scale by animateFloatAsState(
-                                                                                targetValue = when {
-                                                                                        isPressed -> 0.78f
-                                                                                        currentScreen == screen -> 1.18f
-                                                                                        else -> 1f
-                                                                                },
-                                                                                animationSpec = spring(
-                                                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                                                        stiffness = Spring.StiffnessMedium
-                                                                                ),
-                                                                                label = "${screen}_scale"
-                                                                        )
-                                                                        NavigationBarItem(
-                                                                                selected = currentScreen == screen,
-                                                                                onClick = {
-                                                                                        cleanupControllers()
-                                                                                        currentScreen = screen
-                                                                                },
-                                                                                icon = {
-                                                                                        Text(
-                                                                                                text = emoji,
-                                                                                                fontSize = 22.sp,
-                                                                                                modifier = Modifier.scale(scale)
-                                                                                        )
-                                                                                },
-                                                                                label = { Text(label) },
-                                                                                interactionSource = interactionSource
-                                                                        )
+                                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                                        BeaconNavigation(
+                                                onLeaveScreen = ::cleanupControllers,
+                                                emergencyContent = { type, mode, dismiss ->
+                                                        EmergencyTransmissionScreen(type, mode, emergencyManager, dismiss,
+                                                                Modifier.fillMaxSize().safeDrawingPadding())
+                                                },
+                                                featureContent = { screen, modifier, requestEmergency, navigate ->
+                                                        when (screen) {
+                                                                AppScreen.TRANSMIT -> TransmitterScreen(
+                                                                        flashlightController, vibrationController, soundController,
+                                                                        morseEncoder, userPreferences, requestEmergency, modifier)
+                                                                AppScreen.RECEIVE -> ReceiverScreen(
+                                                                        modifier = modifier,
+                                                                        onNavigateToVibrationDetector = { navigate(AppScreen.VIBRATION_DETECTOR) })
+                                                                AppScreen.VIBRATION_DETECTOR -> Box(modifier) {
+                                                                        VibrationDetectorScreen(onNavigateBack = { navigate(AppScreen.RECEIVE) })
                                                                 }
+                                                                AppScreen.MESH -> MeshScreen(meshController, userPreferences, modifier)
+                                                                AppScreen.LIGHTMAP -> LightMapScreen(flashlightController, modifier)
+                                                                AppScreen.OSCILLOSCOPE -> OscilloscopeScreen(modifier)
+                                                                AppScreen.SCAN -> SignalScannerScreen(bleScanner, modifier)
+                                                                AppScreen.SETTINGS -> SettingsScreen(userPreferences, modifier)
+                                                                else -> Unit // Institutional/Home/emergency routes belong to the UX shell.
                                                         }
                                                 }
-                                        }
-                                ) { innerPadding ->
-                                        when (currentScreen) {
-                                                "welcome" ->
-                                                        WelcomeScreen(
-                                                                onNavigateToTransmit = {
-                                                                        cleanupControllers()
-                                                                        currentScreen = "transmit"
-                                                                },
-                                                                onNavigateToReceive = {
-                                                                        cleanupControllers()
-                                                                        currentScreen = "receive"
-                                                                },
-                                                                onEmergencySOS = {
-                                                                        cleanupControllers()
-                                                                        emergencyType = EmergencyType.SOS
-                                                                        emergencyMode = EmergencyMode.ALL
-                                                                        currentScreen = "emergency"
-                                                                },
-                                                                onEmergencyHelp = {
-                                                                        cleanupControllers()
-                                                                        emergencyType = EmergencyType.HELP
-                                                                        emergencyMode = EmergencyMode.ALL
-                                                                        currentScreen = "emergency"
-                                                                },
-                                                                modifier =
-                                                                        Modifier.padding(
-                                                                                innerPadding
-                                                                        )
-                                                        )
-                                                "emergency" ->
-                                                        emergencyType?.let { type ->
-                                                                EmergencyTransmissionScreen(
-                                                                        emergencyType = type,
-                                                                        mode = emergencyMode,
-                                                                        emergencyManager = emergencyManager,
-                                                                        onDismiss = {
-                                                                                cleanupControllers()
-                                                                                currentScreen = "welcome"
-                                                                                emergencyType = null
-                                                                        },
-                                                                        modifier = Modifier.fillMaxSize()
-                                                                )
-                                                        }
-                                                "transmit" ->
-                                                        TransmitterScreen(
-                                                                flashlightController =
-                                                                        flashlightController,
-                                                                vibrationController =
-                                                                        vibrationController,
-                                                                soundController = soundController,
-                                                                morseEncoder = morseEncoder,
-                                                                userPreferences = userPreferences,
-                                                                onEmergencyTrigger = { type, mode ->
-                                                                        cleanupControllers()
-                                                                        emergencyType = type
-                                                                        emergencyMode = mode
-                                                                        currentScreen = "emergency"
-                                                                },
-                                                                modifier =
-                                                                        Modifier.padding(
-                                                                                innerPadding
-                                                                        )
-                                                        )
-                                                "receive" ->
-                                                        ReceiverScreen(
-                                                                modifier =
-                                                                        Modifier.padding(
-                                                                                innerPadding
-                                                                        ),
-                                                                lifecycleOwner = this@MainActivity,
-                                                                onNavigateToVibrationDetector = {
-                                                                        cleanupControllers()
-                                                                        currentScreen = "vibrationDetector"
-                                                                }
-                                                        )
-                                                "vibrationDetector" ->
-                                                        VibrationDetectorScreen(
-                                                                onNavigateBack = {
-                                                                        cleanupControllers()
-                                                                        currentScreen = "receive"
-                                                                }
-                                                        )
-                                                "mesh" ->
-                                                        MeshScreen(
-                                                                meshController = meshController,
-                                                                userPreferences = userPreferences,
-                                                                modifier =
-                                                                        Modifier.padding(
-                                                                                innerPadding
-                                                                        )
-                                                        )
-                                                "lightmap" ->
-                                                        LightMapScreen(
-                                                                flashlightController = flashlightController,
-                                                                modifier =
-                                                                        Modifier.padding(
-                                                                                innerPadding
-                                                                        )
-                                                        )
-                                                "oscilloscope" ->
-                                                        OscilloscopeScreen(
-                                                                modifier =
-                                                                        Modifier.padding(
-                                                                                innerPadding
-                                                                        )
-                                                        )
-                                                "scan" ->
-                                                        SignalScannerScreen(
-                                                                bleScanner = bleScanner,
-                                                                modifier =
-                                                                        Modifier.padding(
-                                                                                innerPadding
-                                                                        )
-                                                        )
-                                                "settings" ->
-                                                        SettingsScreen(
-                                                                userPreferences = userPreferences,
-                                                                modifier =
-                                                                        Modifier.padding(
-                                                                                innerPadding
-                                                                        )
-                                                        )
-                                        }
-                                }
+                                        )
                                 }
                         }
                 }

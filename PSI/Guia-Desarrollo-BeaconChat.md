@@ -3,6 +3,63 @@
 La ruta de referencia recomendada es `./gradlew testDebugUnitTest assembleDebug` con JDK 17/21. Algunos scripts históricos utilizan rutas Fedora específicas. Se unifican aquí las guías de desarrollo y arranque rápido.
 
 
+## Contrato permanente de UX y navegación · 21/10/2026
+
+Este contrato rige las implementaciones posteriores. Una mejora técnica debe integrarse en su módulo y reutilizar la estructura existente. **No rediseñar pantallas ni cambiar rutas, jerarquía o identidad institucional sin solicitud expresa del usuario.** Los rediseños adicionales se presentan como propuesta y esperan autorización; no se ejecutan como efecto secundario de una función técnica.
+
+### Responsabilidades y rutas
+
+Flujo principal: **Bienvenida institucional → Inicio → acción elegida → Inicio**. `MainActivity` crea e inyecta controladores; `ui/BeaconNavigation.kt` es el único propietario de las rutas de aplicación y el regreso a Inicio. Los módulos reciben callbacks: no pueden convertir una pantalla técnica en el nuevo inicio ni volver a abrir la bienvenida.
+
+| Pantalla/ruta | Responsabilidad | Entrada / salida |
+| --- | --- | --- |
+| `WelcomeScreen` / WELCOME | Solo logo original BeaconChat, nombre BeaconChat y logo original Vetrabyte. Sin botones, modalidades, permisos, red o transmisiones | Inicio nuevo de la actividad: transición automática de 450 ms a HOME. No reaparece en navegación interna ni al restaurar estado |
+| `HomeScreen` / HOME | Verdadero inicio funcional: acciones rápidas locales, emitir, recibir/detectar y acceso separado a Mesh experimental | Sin efectos de emisión al componerse. Atrás desde Inicio conserva la salida normal de Android |
+| `EmergencyTransmissionScreen` / EMERGENCY | Señalización local solicitada explícitamente al `EmergencyManager`, estado local y cancelación accesible | Se abre al pulsar una acción rápida. Detener, cerrar y Atrás paran recursos y vuelven a HOME. Pausa o recreación cancela y vuelve a HOME; no se reanuda una emisión automáticamente |
+| `TransmitterScreen` / TRANSMIT | Editor, codificación y canal de señales/mensajes; reutiliza el mismo componente de ayuda rápida de Inicio | Acceso desde Inicio o barra. Botón Inicio o Atrás → HOME |
+| `ReceiverScreen` / RECEIVE | Recepción por cámara/QR y acceso al detector de vibración | Acceso desde Inicio o barra. Inicio/Atrás → HOME |
+| `VibrationDetectorScreen` / VIBRATION_DETECTOR | Detección táctil existente | Subruta de RECEIVE. Su regreso y Atrás → RECEIVE; botón global Inicio → HOME |
+| `MeshScreen` / MESH | Chat BLE, participación experimental, laboratorio SOS estructurado y gateway existentes | Acceso separado desde Inicio/barra. Inicio/Atrás → HOME; la salida conserva pausa/cierre de radios y sesiones del módulo |
+| SCAN, LIGHTMAP, OSCILLOSCOPE, SETTINGS | Escáner, radar óptico, osciloscopio y configuración existentes | Acceso por la barra avanzada. Inicio/Atrás → HOME |
+
+La barra conserva los siete módulos y su orden: **Transmitir, Recibir, Escáner, Mesh, Radar óptico, Osciloscopio, Configuración**. En anchos pequeños se desplaza horizontalmente y lo indica con texto; no comprime siete objetivos táctiles y etiquetas en 360 dp. Cada módulo conserva sus controles internos. El botón superior «Volver a Inicio» ofrece una salida directa. Migrar la barra a otra jerarquía, agrupar módulos en menús nuevos o rehacer pantallas avanzadas requiere una solicitud adicional.
+
+Las rutas funcionales se guardan con `rememberSaveable`. Restaurar WELCOME o EMERGENCY lleva a HOME: no repite una bienvenida interrumpida ni una señal que ya se detuvo. La bienvenida no es una ruta pública de regreso y EMERGENCY solo se abre con tipo/modo seleccionados explícitamente.
+
+### Acciones compartidas y semántica de emergencia
+
+`ui/components/QuickHelpActions.kt` es la única definición de los cuatro accesos rápidos existentes, usada por Inicio y Transmitir: **SOS**, **HELP/Auxilio**, **TRAPPED/Atrapado** y **DISCRETO**. Conservan tipo y modalidad: los tres primeros solicitan `EmergencyMode.ALL`; Discreto solicita SOS en `DISCREET`. Las pantallas no duplican selección de emisores, codificación ni `startEmergency`. Nuevas acciones locales se integran aquí después de definir su intención y alcance; no se agrega otra fila de botones a la bienvenida.
+
+**Señalización local y SOS estructurado mesh son flujos distintos.** Activar ayuda rápida usa `EmergencyManager`; no crea un incidente SOS V1 ni publica al gateway. El laboratorio SOS estructurado se mantiene en Mesh Radar y sigue limitado a ensayos sintéticos/sin posición permitidos. No se transmite GNSS real por esta reorganización. La UI debe distinguir solicitud/emisión local, escritura de enlace, recepción local y confirmación del destino. No presentar una señal activada como mensaje entregado a un servicio de emergencias, atención o rescate. Inicio y emergencia lo dicen expresamente; los canales mostrados son **solicitados**, no una comprobación de su funcionamiento físico.
+
+### Identidad institucional protegida
+
+- `app/src/main/res/drawable/logo.png`: logo original BeaconChat. Se conserva el archivo sin cambios; no sustituirlo por un icono o dibujo generado. Nombre visible **BeaconChat**.
+- `assets/vetrabyte-logo.webp`: logo original Vetrabyte. Su copia Android `app/src/main/res/drawable-nodpi/vetrabyte_logo.webp` debe ser idéntica byte por byte; SHA-256 `39c22d641f1ba4cd0535098b452119b703ca211875bf4428945b1ad61b58a33f`.
+- Mostrar ambos con `ContentScale.Fit` y proporciones originales (BeaconChat 768:1408; Vetrabyte 790:316). Sin recorte, estiramiento, tintes, filtros, rediseño ni cambios en sus archivos originales. No convertir la bienvenida institucional en panel de acciones, propaganda de una modalidad o una pantalla de carga de red.
+
+### Tamaños, accesibilidad y recursos
+
+Inicio desplaza su contenido verticalmente; evita alturas fijas para texto y botones. El componente rápido usa dos columnas cuando caben y una con texto ampliado. Objetivos táctiles de al menos 48 dp, texto legible con contraste, imágenes con descripción y etiquetas semánticas para herramientas e Inicio. La pantalla de emergencia mantiene Detener y Cerrar fuera del contenido desplazable, también con poco alto disponible. Las nuevas pantallas deben respetar insets del sistema, 360/390 dp, horizontal y escalado de fuente; no resolver un desborde reduciendo artificialmente el texto del sistema.
+
+Cada ruta funcional recibe un `LifecycleOwner` ligado a la actividad y destruido al salir de esa ruta. La cámara de recepción usa este propietario de pantalla, no la actividad completa. Se conservan los `DisposableEffect`, cancelaciones y pausas existentes de cada módulo; abandonar una pantalla no puede dejar emisiones, cámara o escaneo activos. Cambios de rutas llaman a la limpieza de emisores, y la emergencia sigue deteniéndose al salir/pausar. No modificar MeshEngine, GATT, fragmentación, SOS V1, gateway, permisos ni controladores Bluetooth para resolver una decisión visual.
+
+### Revisión de futuras implementaciones
+
+Verificar ruta de entrada y de regreso, ausencia de emisiones en Inicio, bienvenida sin acciones ni permisos, logos originales y ausencia de cambios funcionales de protocolo. Ejecutar `./gradlew testDebugUnitTest assembleDebug` con JDK compatible, `git diff --check` y pruebas de UI disponibles. `NavigationUiTest` prueba la estructura real de UX y su presentación con callbacks de módulos/emisores de ensayo: no sustituye una prueba de radio o sensores. Si hay Android autorizado, instalar por serial explícito y registrar las observaciones; no atribuir pruebas físicas a previews, mocks ni compilación. Mantener los resultados en esta guía; no crear un segundo contrato de UX.
+
+
+### Validación de esta normalización
+
+- Base `main`, HEAD `0d375d3`, con el cambio previo de `deploy-to-phone.sh` conservado. No se crearon ramas/worktrees ni se hizo commit/push.
+- `JAVA_HOME=/home/lordcommander/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2 ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest`: **BUILD SUCCESSFUL**, 235 tests JVM, 0 fallos/errores/omitidos; APK principal y APK instrumentada compiladas. Se mantienen advertencias anteriores de BuildConfig/Java 8/Gradle. Lint no ejecutado en esta iteración.
+- Sin cambios de protocolos, `mesh/`, `sos/`, emisores, controladores ni manifiesto. Identidad BeaconChat y copia Vetrabyte verificadas contra originales. Contraste calculado del texto blanco sobre fondo principal de emergencia: mínimo 7:1 entre los tipos actuales; no equivale a una auditoría completa de accesibilidad.
+- `NavigationUiTest`: nueve casos preparados para estructura institucional, cuatro acciones y salidas, siete rutas avanzadas y propietario de ciclo de vida, restauración sin repetición de bienvenida/emergencia, pausa/reanudación, 360/390 dp, fuente al 200 % y emergencia de alto reducido. Sus callbacks de módulos y emisores son de ensayo: no activan hardware ni demuestran BLE.
+- Ejecución UI/inspección física: pendiente de reconexión ADB. Al comenzar se detectó Moto G51 5G `ZY32FJTWV8`, Android 12, 1080×2460 px, 400 dpi, fuente 1,0, rotación automática desactivada/rotación 0. Antes de instalar, el equipo desapareció de ADB; los intentos devolvieron `device not found`. No se atribuye a este dispositivo ningún resultado visual de la APK nueva hasta ejecutar las pruebas.
+- Artefactos: `app/build/outputs/apk/debug/app-debug.apk`, APK de UI `app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`, reportes JVM `app/build/reports/tests/testDebugUnitTest/`. Comando por serial para la UI, después de instalar ambas APK con `adb -s SERIAL install -r` (añadir `-t` para la APK de test): `adb -s SERIAL shell am instrument -w -r -e class com.nicobutter.beaconchat.NavigationUiTest com.nicobutter.beaconchat.test/androidx.test.runner.AndroidJUnitRunner`. Las capturas se guardan en `files/ux-checks/` del sandbox debug de la app y se pueden extraer con `adb -s SERIAL exec-out run-as com.nicobutter.beaconchat cat files/ux-checks/home-360.png`.
+- No quedan propuestas visuales adicionales implementadas fuera de este contrato. Una sustitución de la barra avanzada, nuevos menús o rediseños de los módulos técnicos quedan como propuestas futuras que requieren solicitud expresa.
+
+
 ---
 
 ## Anexo: desarrollo en dispositivos reales

@@ -22,7 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.nicobutter.beaconchat.controller.EmergencyManager
+import com.nicobutter.beaconchat.ui.components.QuickHelpActions
 import com.nicobutter.beaconchat.domain.EmergencyMode
 import com.nicobutter.beaconchat.domain.EmergencyType
 import com.nicobutter.beaconchat.transceiver.FlashlightController
@@ -178,47 +178,7 @@ fun TransmitterScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // Quick messages
-        Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(6.dp)) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Mensajes rápidos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(12.dp))
-                
-                // Primera fila: SOS y AUXILIO
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    QuickActionButton(
-                        label = "SOS",
-                        onClick = { onEmergencyTrigger(EmergencyType.SOS, EmergencyMode.ALL) },
-                        enabled = !isTransmitting,
-                        modifier = Modifier.weight(1f).height(64.dp)
-                    )
-                    QuickActionButton(
-                        label = "AUXILIO",
-                        onClick = { onEmergencyTrigger(EmergencyType.HELP, EmergencyMode.ALL) },
-                        enabled = !isTransmitting,
-                        modifier = Modifier.weight(1f).height(64.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Segunda fila: ATRAPADO y OK
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    QuickActionButton(
-                        label = "ATRAPADO",
-                        onClick = { onEmergencyTrigger(EmergencyType.TRAPPED, EmergencyMode.ALL) },
-                        enabled = !isTransmitting,
-                        modifier = Modifier.weight(1f).height(64.dp)
-                    )
-                    QuickActionButton(
-                        label = "DISCRETO",
-                        onClick = { onEmergencyTrigger(EmergencyType.SOS, EmergencyMode.DISCREET) },
-                        enabled = !isTransmitting,
-                        modifier = Modifier.weight(1f).height(64.dp)
-                    )
-                }
-            }
-        }
+        QuickHelpActions(onEmergencyTrigger, enabled = !isTransmitting)
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -300,23 +260,6 @@ fun TransmitterScreen(
                 Text("Transmitiendo...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
             }
         }
-    }
-}
-
-@Composable
-private fun QuickActionButton(label: String, onClick: () -> Unit, enabled: Boolean, modifier: Modifier = Modifier) {
-    Button(
-        onClick = onClick, 
-        enabled = enabled, 
-        shape = RoundedCornerShape(12.dp), 
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-    ) {
-        Text(
-            label, 
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold
-        )
     }
 }
 

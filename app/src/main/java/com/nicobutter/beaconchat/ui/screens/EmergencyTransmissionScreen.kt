@@ -1,6 +1,8 @@
 package com.nicobutter.beaconchat.ui.screens
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -14,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -48,6 +51,32 @@ fun EmergencyTransmissionScreen(
 ) {
     var elapsedSeconds by remember { mutableStateOf(0) }
 
+    // Local elapsed-time counter
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(1000)
+            elapsedSeconds++
+        }
+    }
+
+    // Start transmission via manager; stop on leave
+    DisposableEffect(emergencyType, mode) {
+        emergencyManager.startEmergency(emergencyType, mode)
+        onDispose { emergencyManager.stopEmergency() }
+    }
+
+    EmergencyTransmissionContent(emergencyType, mode, elapsedSeconds, onDismiss, modifier)
+}
+
+/** Presentation only, also used by device UI tests without activating any emitters. */
+@Composable
+internal fun EmergencyTransmissionContent(
+    emergencyType: EmergencyType,
+    mode: EmergencyMode,
+    elapsedSeconds: Int,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     // Pulsating animation
     val infiniteTransition = rememberInfiniteTransition(label = "emergency_pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -69,176 +98,49 @@ fun EmergencyTransmissionScreen(
         label = "pulse_alpha"
     )
 
-    // Local elapsed-time counter
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            delay(1000)
-            elapsedSeconds++
-        }
-    }
-
-    // Start transmission via manager; stop on leave
-    DisposableEffect(emergencyType, mode) {
-        emergencyManager.startEmergency(emergencyType, mode)
-        onDispose { emergencyManager.stopEmergency() }
-    }
-
-    val backgroundColor = Color(emergencyType.colorArgb)
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(backgroundColor),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp)
-        ) {
-            // Close button at top
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(56.dp)
-                        .background(Color.White.copy(alpha = 0.3f), CircleShape)
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Cancelar",
-                        tint = Color.White,
-                        modifier = Modifier.size(32.dp)
-                    )
+    // Keep the type's hue with enough contrast for white labels, including HELP's orange.
+    val backgroundColor = lerp(MaterialTheme.colorScheme.background, Color(emergencyType.colorArgb), 0.55f)
+    BoxWithConstraints(modifier.fillMaxSize().background(backgroundColor)) {
+        val compact = maxHeight < 500.dp
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Señalización local", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)
+                    .background(Color.White.copy(alpha = 0.2f), CircleShape)) {
+                    Icon(Icons.Default.Close, contentDescription = "Detener y volver a Inicio", tint = Color.White)
                 }
             }
-            
-            Spacer(modifier = Modifier.weight(1f))
-            
-            // Large pulsating emergency icon
-            Text(
-                text = emergencyType.icon,
-                fontSize = 120.sp,
-                modifier = Modifier
-                    .scale(pulseScale)
-                    .alpha(pulseAlpha)
-            )
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            // Emergency type
-            Text(
-                text = "EMITIENDO",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = 0.9f),
-                textAlign = TextAlign.Center
-            )
-            
-            Text(
-                text = emergencyType.displayName,
-                fontSize = 48.sp,
-                fontWeight = FontWeight.Black,
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-            
-            // Mode indicator with icon
-            Card(
-                modifier = Modifier.padding(vertical = 16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = Color.White.copy(alpha = 0.2f)
-                ),
-                shape = RoundedCornerShape(16.dp)
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = mode.icon,
-                        fontSize = 32.sp
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = mode.description,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "Modo: ${mode.displayName}",
-                            fontSize = 14.sp,
-                            color = Color.White.copy(alpha = 0.8f)
-                        )
+                Text(emergencyType.icon, fontSize = if (compact) 56.sp else 96.sp,
+                    modifier = Modifier.scale(pulseScale).alpha(pulseAlpha))
+                Text(emergencyType.displayName, style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Black, color = Color.White, textAlign = TextAlign.Center)
+                Card(colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Modo: ${mode.displayName}", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(mode.description, color = Color.White)
                     }
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatCard("Tiempo", formatTime(elapsedSeconds), "⏱️", Modifier.weight(1f))
+                    StatCard("Canales solicitados", if (mode == EmergencyMode.ALL) "4" else "1", mode.icon, Modifier.weight(1f))
+                }
+                Text("No confirma recepción, entrega ni contacto con un servicio de emergencias.",
+                    style = MaterialTheme.typography.bodyMedium, color = Color.White, textAlign = TextAlign.Center)
             }
-            
-            // Statistics
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 16.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                StatCard(
-                    label = "Tiempo",
-                    value = formatTime(elapsedSeconds),
-                    icon = "⏱️"
-                )
-                StatCard(
-                    label = "Canales",
-                    value = if (mode == EmergencyMode.ALL) "4" else "1",
-                    icon = mode.icon
-                )
+            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF6B0000)),
+                shape = RoundedCornerShape(16.dp)) {
+                Text("DETENER TRANSMISIÓN", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             }
-            
-            Spacer(modifier = Modifier.weight(1f))
-            
-            // Large cancel button
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = backgroundColor
-                ),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "DETENER TRANSMISIÓN",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Info text
-            Text(
-                text = "Los drones y dispositivos cercanos pueden detectar esta señal",
-                fontSize = 12.sp,
-                color = Color.White.copy(alpha = 0.7f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 24.dp)
-            )
         }
     }
 }

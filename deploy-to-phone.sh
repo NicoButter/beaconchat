@@ -3,14 +3,34 @@
 # Script de despliegue automático a dispositivo Android
 # BeaconChat - Deploy to Phone
 
-set -e  # Detener si hay error
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
 echo "🚀 BeaconChat - Despliegue a dispositivo Android"
 echo "================================================"
 
-# Configurar Java 21
-export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
-export PATH=$JAVA_HOME/bin:$PATH
+# Respetar JAVA_HOME si contiene un JDK 21; buscar alternativas instaladas si no.
+selected_java_home=
+for java_candidate in "${JAVA_HOME:-}" \
+    /usr/lib/jvm/java-21-openjdk /usr/lib/jvm/java-21-openjdk-amd64 \
+    /usr/lib/jvm/java-21-openjdk-* /usr/lib/jvm/jdk-21* \
+    "${GRADLE_USER_HOME:-$HOME/.gradle}"/jdks/*; do
+    [[ -x "$java_candidate/bin/java" && -x "$java_candidate/bin/javac" ]] || continue
+    java_version=$("$java_candidate/bin/java" -version 2>&1) || continue
+    case "$java_version" in
+        *'version "21.'*|*'version "21"'*|*'version "21-'*)
+            selected_java_home=$java_candidate
+            break
+            ;;
+    esac
+done
+if [[ -z "$selected_java_home" ]]; then
+    echo '❌ No se encontró un JDK 21 válido. Configurá JAVA_HOME con su directorio de instalación.' >&2
+    exit 1
+fi
+export JAVA_HOME="$selected_java_home"
+export PATH="$JAVA_HOME/bin:$PATH"
+echo "☕ JDK 21: $JAVA_HOME"
 
 # Colores para output
 RED='\033[0;31m'
@@ -20,7 +40,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}📱 Verificando conexión con dispositivo...${NC}"
-if ! adb devices | grep -q "device$"; then
+device_list=$(adb devices)
+mapfile -t devices < <(awk 'NR > 1 && $2 == "device" { print $1 }' <<< "$device_list")
+if (( ${#devices[@]} == 0 )); then
     echo -e "${RED}❌ No se detectó ningún dispositivo Android conectado${NC}"
     echo "Por favor:"
     echo "  1. Conecta tu celular por USB"
@@ -29,13 +51,27 @@ if ! adb devices | grep -q "device$"; then
     exit 1
 fi
 
-DEVICE=$(adb devices | grep "device$" | head -1 | awk '{print $1}')
+if (( $# > 1 )); then
+    echo "Uso: $0 [SERIAL_ADB]" >&2
+    exit 1
+fi
+DEVICE=${1:-${ANDROID_SERIAL:-}}
+if [[ -z "$DEVICE" ]]; then
+    if (( ${#devices[@]} > 1 )); then
+        echo "Hay varios dispositivos. Usá: $0 SERIAL_ADB" >&2
+        printf '  %s\n' "${devices[@]}" >&2
+        exit 1
+    fi
+    DEVICE=${devices[0]}
+fi
+if [[ "$DEVICE" == -* ]] || [[ $(adb -s "$DEVICE" get-state) != device ]]; then
+    echo "❌ Dispositivo no disponible o sin autorización: $DEVICE" >&2
+    exit 1
+fi
 echo -e "${GREEN}✓ Dispositivo detectado: $DEVICE${NC}"
 
 echo -e "\n${BLUE}🔨 Compilando APK...${NC}"
-./gradlew assembleDebug
-
-if [ $? -ne 0 ]; then
+if ! ./gradlew assembleDebug; then
     echo -e "${RED}❌ Error en la compilación${NC}"
     exit 1
 fi
@@ -43,18 +79,10 @@ fi
 echo -e "${GREEN}✓ Compilación exitosa${NC}"
 
 echo -e "\n${BLUE}📦 Instalando en dispositivo...${NC}"
-# Primero intentamos sobrescribir la app existente
-adb install -r app/build/outputs/apk/debug/app-debug.apk 2>/dev/null
-
-if [ $? -ne 0 ]; then
-    echo -e "${YELLOW}⚠ No se pudo sobrescribir, eliminando versión anterior...${NC}"
-    adb uninstall com.nicobutter.beaconchat 2>/dev/null
-    echo -e "${YELLOW}↻ Instalando versión nueva...${NC}"
-    adb install app/build/outputs/apk/debug/app-debug.apk
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}❌ Error en la instalación${NC}"
-        exit 1
-    fi
+# Actualizar conservando preferencias e identidad mesh; un fallo no debe borrar datos.
+if ! adb -s "$DEVICE" install -r app/build/outputs/apk/debug/app-debug.apk; then
+    echo -e "${RED}❌ Error en la instalación; se conservó la aplicación existente${NC}"
+    exit 1
 fi
 
 echo -e "${GREEN}✓ Instalación exitosa${NC}"
@@ -76,7 +104,7 @@ echo -e "  ${YELLOW}releases/${APK_NAME}${NC}"
 echo -e "  ${YELLOW}releases/BeaconChat_latest.apk${NC}"
 
 echo -e "\n${BLUE}🚀 Iniciando BeaconChat en el dispositivo...${NC}"
-adb shell am start -n com.nicobutter.beaconchat/.MainActivity
+adb -s "$DEVICE" shell am start -n com.nicobutter.beaconchat/.MainActivity
 
 echo -e "\n${GREEN}✅ ¡Despliegue completado exitosamente!${NC}"
 echo -e "${YELLOW}📱 BeaconChat ahora está ejecutándose en tu celular${NC}"
